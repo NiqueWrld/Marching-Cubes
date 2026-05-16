@@ -194,7 +194,7 @@ function marchChunk(densityFn, ox, oy, oz, size, isoLevel) {
         if (e & 1024) edgePts[10] = edgeVert(x+1,y,z+1, x+1,y+1,z+1);
         if (e & 2048) edgePts[11] = edgeVert(x,y,z+1,   x,y+1,z+1);
 
-        const tris = triTable[cubeIdx];
+        const tris = triTable[cubeIdx] ?? triTable[255 - cubeIdx];
         if (!tris) continue;
         for (let t = 0; t < tris.length && tris[t] !== -1; t += 3) {
             const p0 = edgePts[tris[t]],

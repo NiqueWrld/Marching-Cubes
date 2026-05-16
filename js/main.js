@@ -36,7 +36,7 @@ const ISO     = 0.0;
 const CHUNK   = 16;
 const RENDER  = 3;
 const chunks  = new Map();
-const mat     = new THREE.MeshLambertMaterial({ vertexColors: true });
+const mat     = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
 function densityAt(wx, wy, wz) {
     const scale = 0.035;
@@ -103,6 +103,12 @@ const keys = {};
 document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup',   e => keys[e.code] = false);
 
+const GRAVITY    = 30;   // units/s²
+const JUMP_VEL   = 12;   // units/s
+const EYE_HEIGHT = 1.8;  // camera above feet
+let velY     = 0;
+let onGround = false;
+
 let yaw = 0, pitch = 0, locked = false;
 const lockedMsg = document.getElementById('locked-msg');
 const info      = document.getElementById('info');
@@ -145,7 +151,7 @@ function animate() {
     camera.quaternion.setFromEuler(euler);
 
     if (locked) {
-        const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? 30 : 12;
+        const speed = keys['ShiftLeft'] ? 20 : 10;
         const fwd   = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
         const right = new THREE.Vector3(1, 0,  0).applyQuaternion(camera.quaternion);
         fwd.y = 0; fwd.normalize();
@@ -154,8 +160,30 @@ function animate() {
         if (keys['KeyS']) camera.position.addScaledVector(fwd,  -speed * dt);
         if (keys['KeyA']) camera.position.addScaledVector(right, -speed * dt);
         if (keys['KeyD']) camera.position.addScaledVector(right,  speed * dt);
-        if (keys['Space'])   camera.position.y += speed * dt;
-        if (keys['ShiftLeft'] && !keys['KeyW'] && !keys['KeyS']) camera.position.y -= speed * dt;
+        if (keys['Space'] && onGround) { velY = JUMP_VEL; onGround = false; }
+    }
+
+    // ── Gravity & ground collision ────────────────────────────────────────────
+    velY -= GRAVITY * dt;
+    camera.position.y += velY * dt;
+
+    const px = camera.position.x, pz = camera.position.z;
+    const feetY = camera.position.y - EYE_HEIGHT;
+
+    if (densityAt(px, feetY, pz) > ISO) {
+        // Feet are underground – binary-search upward for the surface
+        let lo = feetY, hi = feetY + 2;
+        while (hi < feetY + 30 && densityAt(px, hi, pz) > ISO) hi += 1;
+        for (let i = 0; i < 10; i++) {
+            const mid = (lo + hi) * 0.5;
+            if (densityAt(px, mid, pz) > ISO) lo = mid; else hi = mid;
+        }
+        camera.position.y = hi + EYE_HEIGHT;
+        if (velY < 0) velY = 0;
+        onGround = true;
+    } else {
+        // Check a small step below to know if we're standing on solid ground
+        onGround = densityAt(px, feetY - 0.25, pz) > ISO;
     }
 
     updateChunks();
