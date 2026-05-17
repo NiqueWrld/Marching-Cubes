@@ -21,9 +21,9 @@ export default function Home() {
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-center gap-6 text-center px-4 bg-gray-950">
-            <h1 className="text-5xl font-bold text-white tracking-tight">Marching Cubes</h1>
+            <h1 className="text-5xl font-bold text-white tracking-tight">Zulu Wars</h1>
             <p className="text-gray-400 max-w-md text-lg">
-                A procedurally generated 3D voxel world built with Three.js and marching cubes.
+                A procedurally generated multiplayer 3D world.
             </p>
             {onlineCount !== null && (
                 <p className="text-sm text-green-400">

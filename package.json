@@ -1,14 +1,16 @@
 {
   "name": "marching-cubes-server",
   "version": "1.0.0",
-  "description": "Multiplayer server for Marching Cubes World",
-  "main": "index.js",
+  "description": "Multiplayer server for Zulu Wars",
+  "main": "api/index.js",
   "scripts": {
-    "dev": "vite build && nodemon index.js",
+    "dev": "vite",
+    "server": "nodemon api/index.js",
+    "start": "vite build && cross-env NODE_ENV=production node api/index.js",
     "build": "vite build",
     "preview": "vite preview",
     "vite": "vite",
-    "server": "cross-env NODE_ENV=production node index.js"
+    "server": "cross-env NODE_ENV=production node api/index.js"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

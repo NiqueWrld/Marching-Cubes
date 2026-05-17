@@ -21,7 +21,7 @@ export default function Login() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gray-950">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 flex flex-col gap-4 w-full max-w-sm shadow-lg">
-                <h1 className="text-2xl font-bold text-center text-white">Marching Cubes</h1>
+                <h1 className="text-2xl font-bold text-center text-white">Zulu Wars</h1>
                 {status && <p className="text-sm text-center text-gray-400">{status}</p>}
                 <button
                     id="sign-in-btn"

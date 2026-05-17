@@ -83,7 +83,7 @@ export default function Game() {
             {/* HUD */}
             <div id="ui" className="fixed top-4 left-4 pointer-events-none select-none text-cyan-400 font-mono">
                 <h1 className="text-lg mb-2 tracking-widest" style={{ textShadow: '0 0 8px #0ff' }}>
-                    MARCHING CUBES
+                    ZULU WARS
                 </h1>
                 <p id="pos" className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
                     Position: 0, 0, 0

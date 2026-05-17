@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { ref, onValue, off } from 'firebase/database';
 import { useAuth } from '../context/AuthContext.js';
+import { database } from '../lib/firebase.js';
 import type { Player, PlayerPosition } from '../types/Player.js';
 
 interface UsePlayerResult {
@@ -23,7 +25,7 @@ export function usePlayer(): UsePlayerResult {
     const [isSpectator, setIsSpectator] = useState(false);
     const [serverOnline, setServerOnline] = useState(true);
 
-    // Check API reachability via /api/status (already exists on the server)
+    // Check API reachability via /api/status (socket.io server health, not position)
     useEffect(() => {
         let cancelled = false;
 
@@ -41,21 +43,16 @@ export function usePlayer(): UsePlayerResult {
         return () => { cancelled = true; clearInterval(id); };
     }, []);
 
-    // Load server-saved position when user is available
+    // Subscribe to server-saved position in real-time via RTDB
     useEffect(() => {
-        if (!user) { setPosition(null); return; }
+        if (!user) { setPosition(null); setPosLoading(false); return; }
         setPosLoading(true);
-        user.getIdToken()
-            .then(token =>
-                fetch('/api/player', { headers: { Authorization: `Bearer ${token}` } })
-            )
-            .then(res => {
-                if (!res.ok) return null;
-                return res.json() as Promise<PlayerPosition | null>;
-            })
-            .then(pos => { setPosition(pos); })
-            .catch(() => { setPosition(null); })
-            .finally(() => { setPosLoading(false); });
+        const posRef = ref(database, `players/${user.uid}/position`);
+        const unsub = onValue(posRef, (snap) => {
+            setPosition(snap.exists() ? (snap.val() as PlayerPosition) : null);
+            setPosLoading(false);
+        }, () => { setPosLoading(false); });
+        return () => off(posRef, 'value', unsub);
     }, [user]);
 
     // Poll online player count and spectator flag from globals set by multiplayer.ts

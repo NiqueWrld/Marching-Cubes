@@ -1,5 +1,6 @@
 import { signInWithPopup, signOut as fbSignOut, onAuthStateChanged, User } from 'firebase/auth';
-import { auth, provider } from './lib/firebase.js';
+import { ref, set, get } from 'firebase/database';
+import { auth, provider, database } from './lib/firebase.js';
 
 export { auth, onAuthStateChanged };
 
@@ -12,13 +13,6 @@ export const Auth = (() => {
     let _user:    User | null   = null;
     let _token:   string | null = null;
     let _onReady!: () => void;
-    let _serverDbAvailable = false; // determined by /api/status check
-
-    // Check server capabilities once at startup
-    fetch('/api/status')
-        .then(r => r.json())
-        .then((s: { db: boolean }) => { _serverDbAvailable = !!s.db; })
-        .catch(err => { console.warn('[Auth] Could not fetch /api/status:', err); });
 
     const ready = new Promise<void>(resolve => { _onReady = resolve; });
 
@@ -74,31 +68,20 @@ export const Auth = (() => {
     }
 
     async function loadServerPosition(): Promise<PlayerPosition | null> {
-        if (!_token || !_serverDbAvailable) return null;
+        if (!_user) return null;
         try {
-            const res = await fetch('/api/player', {
-                headers: { Authorization: `Bearer ${_token}` },
-            });
-            if (res.status === 503) { _serverDbAvailable = false; return null; }
-            if (!res.ok) return null;
-            return await res.json() as PlayerPosition;
-        } catch {
+            const snap = await get(ref(database, `players/${_user.uid}/position`));
+            return snap.exists() ? (snap.val() as PlayerPosition) : null;
+        } catch (err) {
+            console.warn('[Auth] loadServerPosition RTDB error:', err);
             return null;
         }
     }
 
     function saveServerPosition(x: number, y: number, z: number, yaw: number, pitch: number): Promise<void> {
-        if (!_token || !_serverDbAvailable) return Promise.resolve();
-        return fetch('/api/player', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
-            body:    JSON.stringify({ x, y, z, yaw, pitch }),
-        }).then(res => {
-            if (!res.ok) {
-                console.warn('[Auth] saveServerPosition failed:', res.status);
-                return Promise.reject(res.status);
-            }
-        }).catch(err => { console.warn('[Auth] saveServerPosition error:', err); });
+        if (!_user) return Promise.resolve();
+        return set(ref(database, `players/${_user.uid}/position`), { x, y, z, yaw, pitch })
+            .catch(err => { console.warn('[Auth] saveServerPosition RTDB error:', err); });
     }
 
     return {
