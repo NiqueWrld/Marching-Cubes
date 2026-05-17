@@ -1,7 +1,23 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import isMobile from '../../lib/isMobile';
+import MobileControls from './Controls/Mobile';
 
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [tapToStart, setTapToStart] = useState(isMobile);
+
+    async function handleTap() {
+        try {
+            await document.documentElement.requestFullscreen();
+        } catch { /* ignored */ }
+        try {
+            const orientation = screen.orientation as ScreenOrientation & {
+                lock?: (o: string) => Promise<void>;
+            };
+            await orientation.lock?.('landscape');
+        } catch { /* ignored */ }
+        setTapToStart(false);
+    }
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -19,6 +35,18 @@ export default function Game() {
         <div className="fixed inset-0 bg-black overflow-hidden">
             {/* Three.js canvas goes here */}
             <div ref={containerRef} className="absolute inset-0" />
+            {isMobile && !tapToStart && <MobileControls />}
+
+            {/* Tap to start overlay – mobile only */}
+            {tapToStart && (
+                <div
+                    onClick={handleTap}
+                    className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 text-white cursor-pointer"
+                >
+                    <p className="text-2xl font-bold tracking-widest mb-2">TAP TO START</p>
+                    <p className="text-xs text-white/50">Enters fullscreen &amp; landscape</p>
+                </div>
+            )}
 
             {/* HUD */}
             <div id="ui" className="fixed top-4 left-4 pointer-events-none select-none text-cyan-400 font-mono">
@@ -28,12 +56,20 @@ export default function Game() {
                 <p id="pos" className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
                     Position: 0, 0, 0
                 </p>
-                <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                    WASD – Move &nbsp; Space – Jump &nbsp; Shift – Sprint
-                </p>
-                <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                    Mouse – Look &nbsp; Click – Lock cursor
-                </p>
+                {isMobile ? (
+                    <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
+                        Left stick – Move &nbsp; Right side – Look &nbsp; Jump – Button
+                    </p>
+                ) : (
+                    <>
+                        <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
+                            WASD – Move &nbsp; Space – Jump &nbsp; Shift – Sprint
+                        </p>
+                        <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
+                            Mouse – Look &nbsp; Click – Lock cursor
+                        </p>
+                    </>
+                )}
 
                 {/* Auth panel */}
                 <div id="auth-panel" className="mt-3 flex items-center gap-2 pointer-events-auto">
@@ -62,10 +98,12 @@ export default function Game() {
                 <div className="absolute top-[9px] left-0 h-[2px] w-full bg-white/70" />
             </div>
 
-            {/* Info bar */}
-            <div id="info" className="fixed bottom-4 left-1/2 -translate-x-1/2 text-white/50 text-xs font-mono pointer-events-none">
-                Click to capture mouse
-            </div>
+            {/* Info bar – desktop only */}
+            {!isMobile && (
+                <div id="info" className="fixed bottom-4 left-1/2 -translate-x-1/2 text-white/50 text-xs font-mono pointer-events-none">
+                    Click to capture mouse
+                </div>
+            )}
 
             {/* Loading / locked message */}
             <div

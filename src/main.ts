@@ -351,9 +351,18 @@ ChunkDB.open().then(async () => {
     for (let dz = -RENDER; dz <= RENDER; dz++)
         queue.push([cx + dx, cy + dy, cz + dz, dx * dx + dy * dy + dz * dz]);
     queue.sort((a, b) => a[3] - b[3]);
-    for (const [qx, qy, qz] of queue) await buildChunk(qx, qy, qz);
 
+    // Build the closest chunks first, hide loading, then build the rest in background
+    const IMMEDIATE = Math.min(8, queue.length);
+    for (let i = 0; i < IMMEDIATE; i++) {
+        const [qx, qy, qz] = queue[i];
+        await buildChunk(qx, qy, qz);
+    }
     lockedMsg.style.display = 'none';
+    for (let i = IMMEDIATE; i < queue.length; i++) {
+        const [qx, qy, qz] = queue[i];
+        await buildChunk(qx, qy, qz);
+    }
 });
 
 function animate(): void {
