@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { Noise } from './noise.js';
 import { marchChunk } from './marching-cubes.js';
 import { Auth } from './auth.js';
-import { Multiplayer, initMultiplayer, whenRoleKnown, isSpectator, spectatorTarget } from './multiplayer.js';
+import { Multiplayer, initMultiplayer, spectatorTarget } from './multiplayer.js';
+import { whenRoleKnown, currentRole } from './lib/gameSession.js';
 import { mobileInput } from './pages/Game/Controls/Mobile/index.js';
-import isMobile from './lib/isMobile.js';
+import { device } from './lib/isMobile.js';
 
 export function startGame(container: HTMLElement): () => void {
 
@@ -313,7 +314,6 @@ let yaw = 0, pitch = 0, locked = false;
 
 const lockedMsg = document.getElementById('locked-msg') as HTMLElement;
 const info      = document.getElementById('info')       as HTMLElement;
-const posEl     = document.getElementById('pos')        as HTMLElement;
 
 document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === renderer.domElement;
@@ -351,9 +351,9 @@ lockedMsg.style.display = 'block';
 lockedMsg.textContent   = 'Connecting to server…';
 
 ChunkDB.open().then(async () => {
-    await whenRoleKnown;  // waits for spectator event OR 150 ms timeout — isSpectator is now reliable
+    await whenRoleKnown;  // resolves once Firestore claimRole() completes
     // Spectator mode — show overlay and skip world/player init
-    if (isSpectator) {
+    if (currentRole === 'spectator') {
         lockedMsg.textContent = '👁 Spectator Mode\nAlready connected on another device.';
         lockedMsg.style.whiteSpace = 'pre-line';
         return;
@@ -403,14 +403,12 @@ function animate(): void {
     camera.quaternion.setFromEuler(euler);
 
     // ── Spectator: mirror primary player's camera exactly ────────────────────
-    if (isSpectator) {
-        if (spectatorTarget.ready) {
-            camera.position.set(spectatorTarget.x, spectatorTarget.y, spectatorTarget.z);
-            yaw   = spectatorTarget.yaw;
-            pitch = spectatorTarget.pitch;
-            euler.set(pitch, yaw, 0);
-            camera.quaternion.setFromEuler(euler);
-        }
+    if (currentRole === 'spectator') {
+        camera.position.set(spectatorTarget.x, spectatorTarget.y, spectatorTarget.z);
+        yaw   = spectatorTarget.yaw;
+        pitch = spectatorTarget.pitch;
+        euler.set(pitch, yaw, 0);
+        camera.quaternion.setFromEuler(euler);
         waterUniforms.uTime.value += dt;
         renderer.render(scene, camera);
         return;
@@ -430,7 +428,7 @@ function animate(): void {
     }
 
     // ── Mobile controls ──────────────────────────────────────────────────────
-    if (isMobile && (mobileInput.forward !== 0 || mobileInput.strafe !== 0 || mobileInput.lookDx !== 0 || mobileInput.lookDy !== 0 || mobileInput.jump)) {
+    if (device.isMobile && (mobileInput.forward !== 0 || mobileInput.strafe !== 0 || mobileInput.lookDx !== 0 || mobileInput.lookDy !== 0 || mobileInput.jump)) {
         const mSpeed = (mobileInput.sprint ? 20 : 10);
         const fwd   = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
         const right = new THREE.Vector3(1, 0,  0).applyQuaternion(camera.quaternion);
@@ -499,8 +497,6 @@ function animate(): void {
     updateChunks();
 
     const p = camera.position;
-    posEl.textContent = `Position: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
-
     playerSaveTimer += dt;
     if (playerSaveTimer >= 2 && !playerSaveFailed) {
         playerSaveTimer = 0;
@@ -520,7 +516,7 @@ function onResize() {
 }
 
 window.addEventListener('beforeunload', () => {
-    if (!isSpectator) {
+    if (currentRole !== 'spectator') {
         const p = camera.position;
         Auth.saveServerPosition(p.x, p.y, p.z, yaw, pitch);
     }

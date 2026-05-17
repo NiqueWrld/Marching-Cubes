@@ -1,6 +1,6 @@
 import { Play } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
-import isMobile from '../lib/isMobile';
+import { device } from '../lib/isMobile';
 import { usePlayer } from '../hooks/usePlayer.js';
 
 export default function Home() {
@@ -8,7 +8,7 @@ export default function Home() {
     const { player, onlineCount } = usePlayer();
 
     function handlePlay() {
-        if (isMobile) {
+        if (device.isMobile) {
             const el = document.documentElement;
             el.requestFullscreen?.().catch(() => {});
             const orientation = screen.orientation as ScreenOrientation & {

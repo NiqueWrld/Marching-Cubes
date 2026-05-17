@@ -66,27 +66,20 @@ let socket: Socket | null = null;
 let _resolveConnected: () => void;
 export const whenConnected: Promise<void> = new Promise(res => { _resolveConnected = res; });
 
-let _resolveRole: () => void;
-/** Resolves once the server confirmed the role: spectator event received, or 150 ms after connect (= regular player) */
-export const whenRoleKnown: Promise<void> = new Promise(res => { _resolveRole = res; });
-
-export let isSpectator = false;
+/** Spectator camera target — updated by server player:move events when this device is a spectator */
 export const spectatorTarget = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, ready: false };
 
 function connect(token: string): void {
     if (socket) socket.disconnect();
     socket = io({ auth: { token } });
 
-    socket.on('spectator', ({ x, y, z, yaw, pitch }: { x?: number; y?: number; z?: number; yaw?: number; pitch?: number; reason?: string }) => {
-        isSpectator = true;
-        (window as unknown as Record<string, unknown>).__spectator__ = true;
+    // 'spectator' event now only used for initial camera position seed
+    socket.on('spectator', ({ x, y, z, yaw, pitch }: { x?: number; y?: number; z?: number; yaw?: number; pitch?: number }) => {
         if (typeof x === 'number') {
             spectatorTarget.x = x; spectatorTarget.y = y!; spectatorTarget.z = z!;
             spectatorTarget.yaw = yaw ?? 0; spectatorTarget.pitch = pitch ?? 0;
             spectatorTarget.ready = true;
         }
-        _resolveRole();
-        console.warn('[Multiplayer] This device is in spectator mode (already connected elsewhere)');
     });
 
     socket.on('connect_error', (err: Error) => {
@@ -102,8 +95,9 @@ function connect(token: string): void {
     });
 
     socket.on('player:move', ({ uid, x, y, z, yaw, pitch }: { uid: string; x: number; y: number; z: number; yaw: number; pitch: number }) => {
-        // Spectator: track own player's position
-        if (isSpectator && uid === Auth.getUser()?.uid) {
+        // Spectator: track own primary player's position for camera sync
+        const isSpec = (window as unknown as Record<string, unknown>).__spectator__ === true;
+        if (isSpec && uid === Auth.getUser()?.uid) {
             spectatorTarget.x = x; spectatorTarget.y = y; spectatorTarget.z = z;
             spectatorTarget.yaw = yaw; spectatorTarget.pitch = pitch ?? 0;
             spectatorTarget.ready = true;
@@ -131,8 +125,6 @@ function connect(token: string): void {
         console.log('[Multiplayer] Connected as', Auth.getUser()?.displayName);
         (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
         _resolveConnected();
-        // Give server 150 ms to send a 'spectator' event; if none arrives, we're a regular player
-        setTimeout(_resolveRole, 150);
     });
 
     socket.on('disconnect', () => {

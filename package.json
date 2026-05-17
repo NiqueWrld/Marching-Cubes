@@ -4,13 +4,12 @@
   "description": "Multiplayer server for Zulu Wars",
   "main": "api/index.js",
   "scripts": {
-    "dev": "vite",
-    "server": "nodemon api/index.js",
+    "dev": "concurrently -n vite,api -c cyan,yellow \"vite\" \"cross-env NODE_ENV=development nodemon api/index.js\"",
+    "server": "cross-env NODE_ENV=production node api/index.js",
     "start": "vite build && cross-env NODE_ENV=production node api/index.js",
     "build": "vite build",
     "preview": "vite preview",
-    "vite": "vite",
-    "server": "cross-env NODE_ENV=production node api/index.js"
+    "vite": "vite"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
@@ -34,6 +33,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.184.1",
+    "concurrently": "^9.2.1",
     "nodemon": "^3.1.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",

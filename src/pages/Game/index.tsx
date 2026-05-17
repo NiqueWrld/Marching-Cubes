@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import isMobile from '../../lib/isMobile';
+import { device } from '../../lib/isMobile';
 import MobileControls from './Controls/Mobile';
 
 function OnlineBar() {
@@ -31,7 +31,7 @@ function OnlineBar() {
 
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [tapToStart, setTapToStart] = useState(isMobile);
+    const [tapToStart, setTapToStart] = useState(device.isMobile);
 
     async function handleTap() {
         try {
@@ -64,7 +64,7 @@ export default function Game() {
         <div className="fixed inset-0 bg-black overflow-hidden">
             {/* Three.js canvas goes here */}
             <div ref={containerRef} className="absolute inset-0" />
-            {isMobile && !tapToStart && <MobileControls />}
+            {device.isMobile && !tapToStart && <MobileControls />}
 
             {/* Top-center online bar */}
             {!tapToStart && <OnlineBar />}
@@ -80,31 +80,8 @@ export default function Game() {
                 </div>
             )}
 
-            {/* HUD */}
-            <div id="ui" className="fixed top-4 left-4 pointer-events-none select-none text-cyan-400 font-mono">
-                <h1 className="text-lg mb-2 tracking-widest" style={{ textShadow: '0 0 8px #0ff' }}>
-                    ZULU WARS
-                </h1>
-                <p id="pos" className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                    Position: 0, 0, 0
-                </p>
-                {isMobile ? (
-                    <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                        Left stick – Move &nbsp; Right side – Look &nbsp; Jump – Button
-                    </p>
-                ) : (
-                    <>
-                        <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                            WASD – Move &nbsp; Space – Jump &nbsp; Shift – Sprint
-                        </p>
-                        <p className="text-xs leading-relaxed opacity-80" style={{ textShadow: '0 0 8px #0ff' }}>
-                            Mouse – Look &nbsp; Click – Lock cursor
-                        </p>
-                    </>
-                )}
-
-                {/* Auth panel */}
-                <div id="auth-panel" className="mt-3 flex items-center gap-2 pointer-events-auto">
+            {/* Auth panel */}
+            <div id="auth-panel" className="fixed top-4 left-4 flex items-center gap-2 pointer-events-auto z-10 font-mono">
                     <button
                         id="sign-in-btn"
                         className="flex items-center gap-2 text-white text-xs px-3 py-1.5 rounded shadow font-semibold bg-[#4285F4] hover:bg-[#357ae8] transition-colors"
@@ -115,14 +92,13 @@ export default function Game() {
                         Sign in with Google
                     </button>
                     <div id="user-info" className="hidden flex items-center gap-2">
-                        <img id="user-photo" src="" alt="avatar" className="w-7 h-7 rounded-full object-cover" />
+                        <img id="user-photo" alt="avatar" className="w-7 h-7 rounded-full object-cover" />
                         <span id="user-name" className="text-xs text-cyan-300" />
                         <button id="sign-out-btn" className="text-xs text-white/50 hover:text-white underline pointer-events-auto">
                             Sign out
                         </button>
                     </div>
                 </div>
-            </div>
 
             {/* Crosshair */}
             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none">
@@ -131,7 +107,7 @@ export default function Game() {
             </div>
 
             {/* Info bar – desktop only */}
-            {!isMobile && (
+            {!device.isMobile && (
                 <div id="info" className="fixed bottom-4 left-1/2 -translate-x-1/2 text-white/50 text-xs font-mono pointer-events-none">
                     Click to capture mouse
                 </div>

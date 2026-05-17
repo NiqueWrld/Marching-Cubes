@@ -37,9 +37,11 @@ const io     = new Server(server, {
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Serve built frontend
+// Serve built frontend (production only — in dev, Vite serves the frontend)
 const DIST_DIR = path.join(__dirname, '..', 'dist');
-app.use(express.static(DIST_DIR, { redirect: false }));
+if (process.env.NODE_ENV !== 'development') {
+    app.use(express.static(DIST_DIR, { redirect: false }));
+}
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 async function verifyToken(req, res, next) {
@@ -196,14 +198,16 @@ io.on('connection', (socket) => {
     });
 });
 
-// ─── SPA fallback ─────────────────────────────────────────────────────────────
-app.get('*', (req, res) => {
-    const indexFile = path.join(DIST_DIR, 'index.html');
-    if (!fs.existsSync(indexFile)) {
-        return res.status(503).send('Frontend not built. Run: npm run build');
-    }
-    res.sendFile(indexFile);
-});
+// ─── SPA fallback (production only) ──────────────────────────────────────────
+if (process.env.NODE_ENV !== 'development') {
+    app.get('*', (req, res) => {
+        const indexFile = path.join(DIST_DIR, 'index.html');
+        if (!fs.existsSync(indexFile)) {
+            return res.status(503).send('Frontend not built. Run: npm run build');
+        }
+        res.sendFile(indexFile);
+    });
+}
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {
