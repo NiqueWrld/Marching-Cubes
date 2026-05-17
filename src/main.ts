@@ -12,9 +12,9 @@ export function startGame(container: HTMLElement): () => void {
 // ─── Scene ────────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 80, 380);
+scene.fog = new THREE.Fog(0x87ceeb, 120, 512);
 
-const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 700);
 camera.position.set(0, 35, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -121,7 +121,7 @@ const ChunkDB = (() => {
 const noise  = new Noise(12345);
 const ISO    = 0.0;
 const CHUNK  = 16;
-const RENDER = 12;
+const RENDER = 16;
 
 const WATER_SIZE = RENDER * CHUNK * 2 + CHUNK;
 const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, 40, 40), waterMat);
@@ -280,18 +280,31 @@ function updateChunks(): void {
     if (cx === lastCX && cy === lastCY && cz === lastCZ) return;
     lastCX = cx; lastCY = cy; lastCZ = cz;
 
+    const R2 = RENDER * RENDER;
     for (const key of chunks.keys()) {
         const [kx, ky, kz] = key.split(',').map(Number);
-        if (Math.abs(kx - cx) > RENDER + 1 || Math.abs(ky - cy) > 2 || Math.abs(kz - cz) > RENDER + 1)
+        const dx = kx - cx, dz = kz - cz;
+        if (dx * dx + dz * dz > (RENDER + 1) * (RENDER + 1) || Math.abs(ky - cy) > 2)
             removeChunk(key);
     }
+
+    // Camera forward (horizontal) for direction-biased priority
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    fwd.y = 0;
+    if (fwd.lengthSq() > 0) fwd.normalize();
 
     const queue: [number, number, number, number][] = [];
     for (let dx = -RENDER; dx <= RENDER; dx++)
     for (let dy = -1; dy <= 1; dy++)
     for (let dz = -RENDER; dz <= RENDER; dz++) {
+        if (dx * dx + dz * dz > R2) continue;
         const key = `${cx + dx},${cy + dy},${cz + dz}`;
-        if (!chunks.has(key)) queue.push([cx + dx, cy + dy, cz + dz, dx * dx + dy * dy + dz * dz]);
+        if (chunks.has(key)) continue;
+        // priority: distance² minus forward-bias bonus (smaller = built first)
+        const dist2 = dx * dx + dy * dy + dz * dz;
+        const dot = (dx * fwd.x + dz * fwd.z); // chunk-units along view dir
+        const priority = dist2 - dot * 4; // bonus weight
+        queue.push([cx + dx, cy + dy, cz + dz, priority]);
     }
     queue.sort((a, b) => a[3] - b[3]);
     let built = 0;
@@ -372,10 +385,14 @@ ChunkDB.open().then(async () => {
     const cy = Math.floor(camera.position.y / CHUNK);
     const cz = Math.floor(camera.position.z / CHUNK);
     const queue: [number, number, number, number][] = [];
+    const R2 = RENDER * RENDER;
     for (let dx = -RENDER; dx <= RENDER; dx++)
     for (let dy = -1; dy <= 1; dy++)
-    for (let dz = -RENDER; dz <= RENDER; dz++)
+    for (let dz = -RENDER; dz <= RENDER; dz++) {
+        // circular (Euclidean) mask — skip the square's corners
+        if (dx * dx + dz * dz > R2) continue;
         queue.push([cx + dx, cy + dy, cz + dz, dx * dx + dy * dy + dz * dz]);
+    }
     queue.sort((a, b) => a[3] - b[3]);
 
     // Build the closest chunks first, hide loading, then build the rest in background
@@ -388,6 +405,8 @@ ChunkDB.open().then(async () => {
     for (let i = IMMEDIATE; i < queue.length; i++) {
         const [qx, qy, qz] = queue[i];
         await buildChunk(qx, qy, qz);
+        // yield to the main thread every 8 chunks so the page stays responsive
+        if ((i & 7) === 0) await new Promise(r => setTimeout(r, 0));
     }
 }).catch(err => {
     console.error('[Game] World initialisation failed:', err);
