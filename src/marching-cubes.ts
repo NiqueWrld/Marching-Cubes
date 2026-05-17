@@ -17,7 +17,7 @@ const edgeTable = new Int32Array([
 0xf00,0xe09,0xd03,0xc0a,0xb06,0xa0f,0x905,0x80c,0x70c,0x605,0x50f,0x406,0x30a,0x203,0x109,0x0
 ]);
 
-const triTable = [
+const triTable: number[][] = [
 [-1],
 [0,8,3,-1],
 [0,1,9,-1],
@@ -148,70 +148,80 @@ const triTable = [
 [7,11,6,-1]
 ];
 
-function marchChunk(densityFn, ox, oy, oz, size, isoLevel) {
+type DensityFn = (wx: number, wy: number, wz: number) => number;
+
+export function marchChunk(
+    densityFn: DensityFn,
+    ox: number, oy: number, oz: number,
+    size: number,
+    isoLevel: number,
+): { verts: number[]; norms: number[]; cols: number[] } {
     const N = size + 1;
-    const verts = [], norms = [], cols = [];
+    const verts: number[] = [], norms: number[] = [], cols: number[] = [];
 
     const density = new Float32Array(N * N * N);
-    const idx = (x, y, z) => x * N * N + y * N + z;
+    const idx = (x: number, y: number, z: number) => x * N * N + y * N + z;
 
     for (let x = 0; x < N; x++)
     for (let y = 0; y < N; y++)
     for (let z = 0; z < N; z++)
-        density[idx(x,y,z)] = densityFn(ox+x, oy+y, oz+z);
+        density[idx(x, y, z)] = densityFn(ox + x, oy + y, oz + z);
 
-    const edgeVert = (x0,y0,z0, x1,y1,z1) => {
-        const d0 = density[idx(x0,y0,z0)], d1 = density[idx(x1,y1,z1)];
+    const edgeVert = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): [number, number, number] => {
+        const d0 = density[idx(x0, y0, z0)], d1 = density[idx(x1, y1, z1)];
         const t = (isoLevel - d0) / (d1 - d0 + 1e-9);
-        return [x0 + t*(x1-x0), y0 + t*(y1-y0), z0 + t*(z1-z0)];
+        return [x0 + t * (x1 - x0), y0 + t * (y1 - y0), z0 + t * (z1 - z0)];
     };
 
     for (let x = 0; x < size; x++)
     for (let y = 0; y < size; y++)
     for (let z = 0; z < size; z++) {
         const corners = [
-            density[idx(x,  y,  z  )], density[idx(x+1,y,  z  )],
-            density[idx(x+1,y,  z+1)], density[idx(x,  y,  z+1)],
-            density[idx(x,  y+1,z  )], density[idx(x+1,y+1,z  )],
-            density[idx(x+1,y+1,z+1)], density[idx(x,  y+1,z+1)]
+            density[idx(x,   y,   z  )], density[idx(x+1, y,   z  )],
+            density[idx(x+1, y,   z+1)], density[idx(x,   y,   z+1)],
+            density[idx(x,   y+1, z  )], density[idx(x+1, y+1, z  )],
+            density[idx(x+1, y+1, z+1)], density[idx(x,   y+1, z+1)],
         ];
         let cubeIdx = 0;
         for (let i = 0; i < 8; i++) if (corners[i] < isoLevel) cubeIdx |= (1 << i);
         if (edgeTable[cubeIdx] === 0) continue;
 
-        const edgePts = [null,null,null,null,null,null,null,null,null,null,null,null];
+        const edgePts: ([number, number, number] | null)[] = new Array(12).fill(null);
         const e = edgeTable[cubeIdx];
-        if (e & 1)    edgePts[0]  = edgeVert(x,y,z,     x+1,y,z);
-        if (e & 2)    edgePts[1]  = edgeVert(x+1,y,z,   x+1,y,z+1);
-        if (e & 4)    edgePts[2]  = edgeVert(x,y,z+1,   x+1,y,z+1);
-        if (e & 8)    edgePts[3]  = edgeVert(x,y,z,     x,y,z+1);
-        if (e & 16)   edgePts[4]  = edgeVert(x,y+1,z,   x+1,y+1,z);
-        if (e & 32)   edgePts[5]  = edgeVert(x+1,y+1,z, x+1,y+1,z+1);
-        if (e & 64)   edgePts[6]  = edgeVert(x,y+1,z+1, x+1,y+1,z+1);
-        if (e & 128)  edgePts[7]  = edgeVert(x,y+1,z,   x,y+1,z+1);
-        if (e & 256)  edgePts[8]  = edgeVert(x,y,z,     x,y+1,z);
-        if (e & 512)  edgePts[9]  = edgeVert(x+1,y,z,   x+1,y+1,z);
-        if (e & 1024) edgePts[10] = edgeVert(x+1,y,z+1, x+1,y+1,z+1);
-        if (e & 2048) edgePts[11] = edgeVert(x,y,z+1,   x,y+1,z+1);
+        if (e &    1) edgePts[0]  = edgeVert(x,   y,   z,   x+1, y,   z  );
+        if (e &    2) edgePts[1]  = edgeVert(x+1, y,   z,   x+1, y,   z+1);
+        if (e &    4) edgePts[2]  = edgeVert(x,   y,   z+1, x+1, y,   z+1);
+        if (e &    8) edgePts[3]  = edgeVert(x,   y,   z,   x,   y,   z+1);
+        if (e &   16) edgePts[4]  = edgeVert(x,   y+1, z,   x+1, y+1, z  );
+        if (e &   32) edgePts[5]  = edgeVert(x+1, y+1, z,   x+1, y+1, z+1);
+        if (e &   64) edgePts[6]  = edgeVert(x,   y+1, z+1, x+1, y+1, z+1);
+        if (e &  128) edgePts[7]  = edgeVert(x,   y+1, z,   x,   y+1, z+1);
+        if (e &  256) edgePts[8]  = edgeVert(x,   y,   z,   x,   y+1, z  );
+        if (e &  512) edgePts[9]  = edgeVert(x+1, y,   z,   x+1, y+1, z  );
+        if (e & 1024) edgePts[10] = edgeVert(x+1, y,   z+1, x+1, y+1, z+1);
+        if (e & 2048) edgePts[11] = edgeVert(x,   y,   z+1, x,   y+1, z+1);
 
         const tris = triTable[cubeIdx] ?? triTable[255 - cubeIdx];
         if (!tris) continue;
+
         for (let t = 0; t < tris.length && tris[t] !== -1; t += 3) {
             const p0 = edgePts[tris[t]],
                   p1 = edgePts[tris[t+1]],
                   p2 = edgePts[tris[t+2]];
             if (!p0 || !p1 || !p2) continue;
-            const ax=p1[0]-p0[0],ay=p1[1]-p0[1],az=p1[2]-p0[2];
-            const bx=p2[0]-p0[0],by=p2[1]-p0[1],bz=p2[2]-p0[2];
-            const nx=ay*bz-az*by, ny=az*bx-ax*bz, nz=ax*by-ay*bx;
-            const len=Math.sqrt(nx*nx+ny*ny+nz*nz)+1e-9;
+
+            const ax = p1[0]-p0[0], ay = p1[1]-p0[1], az = p1[2]-p0[2];
+            const bx = p2[0]-p0[0], by = p2[1]-p0[1], bz = p2[2]-p0[2];
+            const nx = ay*bz - az*by, ny = az*bx - ax*bz, nz = ax*by - ay*bx;
+            const len = Math.sqrt(nx*nx + ny*ny + nz*nz) + 1e-9;
+
             for (let k = 0; k < 3; k++) {
                 const pt = [p0, p1, p2][k];
                 verts.push(ox + pt[0], oy + pt[1], oz + pt[2]);
                 norms.push(nx/len, ny/len, nz/len);
                 const worldY = oy + pt[1];
-                if (worldY < 4)       cols.push(0.24, 0.45, 0.90);
-                else if (worldY < 8)  cols.push(0.76, 0.70, 0.50);
+                if      (worldY <  4) cols.push(0.24, 0.45, 0.90);
+                else if (worldY <  8) cols.push(0.76, 0.70, 0.50);
                 else if (worldY < 20) cols.push(0.25, 0.55, 0.25);
                 else if (worldY < 28) cols.push(0.40, 0.35, 0.30);
                 else                  cols.push(0.95, 0.95, 1.00);

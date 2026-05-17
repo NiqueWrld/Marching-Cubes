@@ -4,17 +4,34 @@
   "description": "Multiplayer server for Marching Cubes World",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node index.js",
+    "server:dev": "nodemon index.js"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@phosphor-icons/web": "^2.1.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "firebase": "^12.13.0",
     "firebase-admin": "^12.1.0",
-    "socket.io": "^4.7.5"
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "^7.15.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.3",
+    "three": "^0.184.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "@types/node": "^25.8.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.184.1",
+    "nodemon": "^3.1.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
   }
 }

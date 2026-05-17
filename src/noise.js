@@ -1,4 +1,4 @@
-class Noise {
+export class Noise {
     constructor(seed = 42) {
         this.p = new Uint8Array(512);
         const base = new Uint8Array(256);
