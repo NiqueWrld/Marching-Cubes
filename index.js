@@ -69,8 +69,13 @@ app.get('/api/status', (req, res) => {
 // ─── REST: player position ────────────────────────────────────────────────────
 app.get('/api/player', verifyToken, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database not configured' });
-    const snap = await db.ref(`players/${req.user.uid}/state`).once('value');
-    res.json(snap.val() || null);
+    try {
+        const snap = await db.ref(`players/${req.user.uid}/state`).once('value');
+        res.json(snap.val() || null);
+    } catch (err) {
+        console.error('[GET /api/player]', err);
+        res.status(500).json({ error: 'Database error' });
+    }
 });
 
 app.post('/api/player', verifyToken, async (req, res) => {
@@ -79,13 +84,18 @@ app.post('/api/player', verifyToken, async (req, res) => {
     if ([x, y, z, yaw, pitch].some(v => typeof v !== 'number')) {
         return res.status(400).json({ error: 'Invalid body' });
     }
-    await db.ref(`players/${req.user.uid}`).update({
-        state:    { x, y, z, yaw, pitch },
-        name:     req.user.name     ?? 'Unknown',
-        photoURL: req.user.picture  ?? '',
-        lastSeen: Date.now()
-    });
-    res.json({ ok: true });
+    try {
+        await db.ref(`players/${req.user.uid}`).update({
+            state:    { x, y, z, yaw, pitch },
+            name:     req.user.name     ?? 'Unknown',
+            photoURL: req.user.picture  ?? '',
+            lastSeen: Date.now()
+        });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[POST /api/player]', err);
+        res.status(500).json({ error: 'Database error' });
+    }
 });
 
 // ─── REST: chunks ─────────────────────────────────────────────────────────────
@@ -95,15 +105,20 @@ const CHUNK_KEY_RE = /^-?\d+_-?\d+_-?\d+$/;
 app.get('/api/chunks/:key', (req, res) => {
     if (!CHUNK_KEY_RE.test(req.params.key)) return res.status(400).end();
     const file = path.join(CHUNKS_DIR, `${req.params.key}.json`);
-    if (!fs.existsSync(file)) return res.status(404).end();
-    res.sendFile(file);
+    if (!fs.existsSync(file)) return res.json(null); // 200 null = not yet generated; avoids 404 console noise
+    res.sendFile(file, err => {
+        if (err && !res.headersSent) {
+            console.error('[GET /api/chunks]', err);
+            res.status(500).end();
+        }
+    });
 });
 
 app.post('/api/chunks/:key', express.json({ limit: '4mb' }), (req, res) => {
     if (!CHUNK_KEY_RE.test(req.params.key)) return res.status(400).end();
     const file = path.join(CHUNKS_DIR, `${req.params.key}.json`);
     fs.writeFile(file, JSON.stringify(req.body), err => {
-        if (err) return res.status(500).end();
+        if (err) { console.error('[POST /api/chunks]', err); return res.status(500).end(); }
         res.status(204).end();
     });
 });
@@ -172,6 +187,16 @@ app.get('*', (req, res) => {
         return res.status(503).send('Frontend not built. Run: npm run build');
     }
     res.sendFile(indexFile);
+});
+
+// ─── Global error handler ────────────────────────────────────────────────────
+app.use((err, req, res, _next) => {
+    console.error('[Express error]', err);
+    if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[Unhandled rejection]', reason);
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────

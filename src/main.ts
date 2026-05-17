@@ -99,7 +99,8 @@ const ChunkDB = (() => {
         try {
             const res = await fetch(`/api/chunks/${encode(key)}`);
             if (!res.ok) return null;
-            return await res.json() as ChunkData;
+            const data = await res.json() as ChunkData | null;
+            return data ?? null;
         } catch {
             return null;
         }
@@ -363,11 +364,15 @@ ChunkDB.open().then(async () => {
         const [qx, qy, qz] = queue[i];
         await buildChunk(qx, qy, qz);
     }
+}).catch(err => {
+    console.error('[Game] World initialisation failed:', err);
+    lockedMsg.textContent = 'Failed to load world. See console for details.';
 });
 
 function animate(): void {
     if (!running) return;
     requestAnimationFrame(animate);
+    clock.update();
     const dt = Math.min(clock.getDelta(), 0.05);
 
     euler.set(pitch, yaw, 0);

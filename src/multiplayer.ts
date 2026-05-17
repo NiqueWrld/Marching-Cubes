@@ -137,9 +137,15 @@ export function initMultiplayer(scene: THREE.Scene): void {
     Auth.ready.then(() => {
         connect(Auth.getToken() ?? '');
         onAuthStateChanged(auth, async (user) => {
-            const t = user ? await user.getIdToken() : '';
-            connect(t);
+            try {
+                const t = user ? await user.getIdToken() : '';
+                connect(t);
+            } catch (err) {
+                console.error('[Multiplayer] Auth state change error:', err);
+            }
         });
+    }).catch(err => {
+        console.error('[Multiplayer] Init error:', err);
     });
 }
 

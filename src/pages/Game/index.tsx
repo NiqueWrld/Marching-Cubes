@@ -26,6 +26,8 @@ export default function Game() {
         let cleanup: (() => void) | undefined;
         import('../../main.js').then(({ startGame }) => {
             cleanup = startGame(container);
+        }).catch(err => {
+            console.error('[Game] Failed to load game module:', err);
         });
 
         return () => cleanup?.();

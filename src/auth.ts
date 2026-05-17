@@ -18,7 +18,7 @@ export const Auth = (() => {
     fetch('/api/status')
         .then(r => r.json())
         .then((s: { db: boolean }) => { _serverDbAvailable = !!s.db; })
-        .catch(() => {});
+        .catch(err => { console.warn('[Auth] Could not fetch /api/status:', err); });
 
     const ready = new Promise<void>(resolve => { _onReady = resolve; });
 
@@ -29,7 +29,11 @@ export const Auth = (() => {
 
         if (user) {
             setInterval(async () => {
-                _token = await user.getIdToken(true);
+                try {
+                    _token = await user.getIdToken(true);
+                } catch (err) {
+                    console.error('[Auth] Token refresh failed:', err);
+                }
             }, 55 * 60 * 1000);
         }
         _updateAuthUI();
@@ -62,7 +66,11 @@ export const Auth = (() => {
     }
 
     async function signOut(): Promise<void> {
-        await fbSignOut(auth);
+        try {
+            await fbSignOut(auth);
+        } catch (err) {
+            console.error('[Auth] Sign-out failed:', err);
+        }
     }
 
     async function loadServerPosition(): Promise<PlayerPosition | null> {
@@ -85,7 +93,12 @@ export const Auth = (() => {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
             body:    JSON.stringify({ x, y, z, yaw, pitch }),
-        }).then(res => { if (!res.ok) return Promise.reject(res.status); });
+        }).then(res => {
+            if (!res.ok) {
+                console.warn('[Auth] saveServerPosition failed:', res.status);
+                return Promise.reject(res.status);
+            }
+        }).catch(err => { console.warn('[Auth] saveServerPosition error:', err); });
     }
 
     return {
