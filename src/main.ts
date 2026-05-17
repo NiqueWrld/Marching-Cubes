@@ -3,6 +3,8 @@ import { Noise } from './noise.js';
 import { marchChunk } from './marching-cubes.js';
 import { Auth } from './auth.js';
 import { Multiplayer, initMultiplayer } from './multiplayer.js';
+import { mobileInput } from './pages/Game/Controls/Mobile/index.js';
+import isMobile from './lib/isMobile.js';
 
 export function startGame(container: HTMLElement): () => void {
 
@@ -389,6 +391,21 @@ function animate(): void {
         if (keys['KeyA']) camera.position.addScaledVector(right,  -speed * dt);
         if (keys['KeyD']) camera.position.addScaledVector(right,   speed * dt);
         if (keys['Space'] && onGround) { velY = JUMP_VEL; onGround = false; }
+    }
+
+    // ── Mobile controls ──────────────────────────────────────────────────────
+    if (isMobile && (mobileInput.forward !== 0 || mobileInput.strafe !== 0 || mobileInput.lookDx !== 0 || mobileInput.lookDy !== 0 || mobileInput.jump)) {
+        const mSpeed = (mobileInput.sprint ? 20 : 10);
+        const fwd   = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const right = new THREE.Vector3(1, 0,  0).applyQuaternion(camera.quaternion);
+        fwd.y = 0; fwd.normalize();
+        right.y = 0; right.normalize();
+        camera.position.addScaledVector(fwd,   mobileInput.forward * mSpeed * dt);
+        camera.position.addScaledVector(right, mobileInput.strafe  * mSpeed * dt);
+        yaw   -= mobileInput.lookDx * 0.005;
+        pitch -= mobileInput.lookDy * 0.005;
+        pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
+        if (mobileInput.jump && onGround) { velY = JUMP_VEL; onGround = false; mobileInput.jump = false; }
     }
 
     velY -= GRAVITY * dt;
