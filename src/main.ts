@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Noise } from './noise.js';
 import { marchChunk } from './marching-cubes.js';
 import { Auth } from './auth.js';
-import { Multiplayer, initMultiplayer, whenConnected } from './multiplayer.js';
+import { Multiplayer, initMultiplayer, whenRoleKnown, isSpectator, spectatorTarget } from './multiplayer.js';
 import { mobileInput } from './pages/Game/Controls/Mobile/index.js';
 import isMobile from './lib/isMobile.js';
 
@@ -351,7 +351,13 @@ lockedMsg.style.display = 'block';
 lockedMsg.textContent   = 'Connecting to server…';
 
 ChunkDB.open().then(async () => {
-    await whenConnected;
+    await whenRoleKnown;  // waits for spectator event OR 150 ms timeout — isSpectator is now reliable
+    // Spectator mode — show overlay and skip world/player init
+    if (isSpectator) {
+        lockedMsg.textContent = '👁 Spectator Mode\nAlready connected on another device.';
+        lockedMsg.style.whiteSpace = 'pre-line';
+        return;
+    }
     lockedMsg.textContent = 'Loading world…';
     await Auth.ready;
     let saved = Auth.getToken() ? await Auth.loadServerPosition() : null;
@@ -395,6 +401,20 @@ function animate(): void {
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
+
+    // ── Spectator: mirror primary player's camera exactly ────────────────────
+    if (isSpectator) {
+        if (spectatorTarget.ready) {
+            camera.position.set(spectatorTarget.x, spectatorTarget.y, spectatorTarget.z);
+            yaw   = spectatorTarget.yaw;
+            pitch = spectatorTarget.pitch;
+            euler.set(pitch, yaw, 0);
+            camera.quaternion.setFromEuler(euler);
+        }
+        waterUniforms.uTime.value += dt;
+        renderer.render(scene, camera);
+        return;
+    }
 
     if (locked) {
         const speed = keys['ShiftLeft'] ? 20 : 10;
@@ -500,8 +520,10 @@ function onResize() {
 }
 
 window.addEventListener('beforeunload', () => {
-    const p = camera.position;
-    Auth.saveServerPosition(p.x, p.y, p.z, yaw, pitch);
+    if (!isSpectator) {
+        const p = camera.position;
+        Auth.saveServerPosition(p.x, p.y, p.z, yaw, pitch);
+    }
 });
 
 animate();

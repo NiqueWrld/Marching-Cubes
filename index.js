@@ -164,6 +164,20 @@ io.on('connection', (socket) => {
         if (id !== uid) socket.emit('player:join', p);
     }
 
+    // If this uid already has a connected device, this one is a spectator
+    if (alreadyOnline) {
+        const primary = online.get(uid);
+        socket.emit('spectator', {
+            reason: 'Already connected on another device',
+            x: primary?.x ?? 0,
+            y: primary?.y ?? 0,
+            z: primary?.z ?? 0,
+            yaw: primary?.yaw ?? 0,
+            pitch: primary?.pitch ?? 0,
+        });
+        console.log(`[S] ${name} (${uid}) joined as spectator on [${socket.id}]`);
+    }
+
     // Add / update online map entry
     online.set(uid, { uid, name, photoURL, x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
 

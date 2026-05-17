@@ -1,9 +1,11 @@
 import { Play } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import isMobile from '../lib/isMobile';
+import { usePlayer } from '../hooks/usePlayer.js';
 
 export default function Home() {
     const navigate = useNavigate();
+    const { player, onlineCount } = usePlayer();
 
     function handlePlay() {
         if (isMobile) {
@@ -23,6 +25,14 @@ export default function Home() {
             <p className="text-gray-400 max-w-md text-lg">
                 A procedurally generated 3D voxel world built with Three.js and marching cubes.
             </p>
+            {onlineCount !== null && (
+                <p className="text-sm text-green-400">
+                    ● {onlineCount} player{onlineCount === 1 ? '' : 's'} online
+                </p>
+            )}
+            {player && (
+                <p className="text-gray-500 text-sm">Signed in as {player.displayName}</p>
+            )}
             <div className="flex gap-3">
                 <button
                     onClick={handlePlay}
