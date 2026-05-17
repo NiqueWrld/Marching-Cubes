@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { GoogleLogo, User } from '@phosphor-icons/react';
+import { GoogleLogo } from '@phosphor-icons/react';
 import { signInWithPopup } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { auth, provider } from '../../lib/firebase.js';
@@ -18,30 +18,18 @@ export default function Login() {
         }
     }
 
-    function playAsGuest() {
-        navigate('/game');
-    }
-
     return (
-        <div className="min-h-screen flex items-center justify-center">
-            <div className="card p-8 flex flex-col gap-4 w-full max-w-sm">
-                <h1 className="text-2xl font-bold text-center">Marching Cubes</h1>
-                {status && <p className="text-sm text-center text-gray-500">{status}</p>}
+        <div className="min-h-screen flex items-center justify-center bg-gray-950">
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 flex flex-col gap-4 w-full max-w-sm shadow-lg">
+                <h1 className="text-2xl font-bold text-center text-white">Marching Cubes</h1>
+                {status && <p className="text-sm text-center text-gray-400">{status}</p>}
                 <button
                     id="sign-in-btn"
                     onClick={signInWithGoogle}
-                    className="flex items-center justify-center gap-2 btn btn-primary"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
                 >
                     <GoogleLogo size={18} />
                     Sign in with Google
-                </button>
-                <button
-                    id="guest-btn"
-                    onClick={playAsGuest}
-                    className="flex items-center justify-center gap-2 btn btn-secondary"
-                >
-                    <User size={18} />
-                    Play as Guest
                 </button>
             </div>
         </div>

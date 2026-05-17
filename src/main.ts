@@ -4,19 +4,21 @@ import { marchChunk } from './marching-cubes.js';
 import { Auth } from './auth.js';
 import { Multiplayer, initMultiplayer } from './multiplayer.js';
 
+export function startGame(container: HTMLElement): () => void {
+
 // ─── Scene ────────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 80, 380);
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 500);
 camera.position.set(0, 35, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(devicePixelRatio);
-renderer.setSize(innerWidth, innerHeight);
+renderer.setSize(container.clientWidth, container.clientHeight);
 renderer.shadowMap.enabled = true;
-document.body.prepend(renderer.domElement);
+container.prepend(renderer.domElement);
 
 // ─── Lighting ─────────────────────────────────────────────────────────────────
 const sun = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -325,6 +327,7 @@ initMultiplayer(scene);
 const clock  = new THREE.Clock();
 const euler  = new THREE.Euler(0, 0, 0, 'YXZ');
 let playerSaveTimer = 0;
+let running = true;
 
 lockedMsg.style.display = 'block';
 lockedMsg.textContent   = 'Loading world…';
@@ -354,6 +357,7 @@ ChunkDB.open().then(async () => {
 });
 
 function animate(): void {
+    if (!running) return;
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);
 
@@ -409,11 +413,12 @@ function animate(): void {
     renderer.render(scene, camera);
 }
 
-window.addEventListener('resize', () => {
-    camera.aspect = innerWidth / innerHeight;
+window.addEventListener('resize', onResize);
+function onResize() {
+    camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth, innerHeight);
-});
+    renderer.setSize(container.clientWidth, container.clientHeight);
+}
 
 window.addEventListener('beforeunload', () => {
     const p = camera.position;
@@ -421,3 +426,12 @@ window.addEventListener('beforeunload', () => {
 });
 
 animate();
+
+return function cleanup() {
+    running = false;
+    window.removeEventListener('resize', onResize);
+    renderer.domElement.remove();
+    renderer.dispose();
+};
+
+} // end startGame

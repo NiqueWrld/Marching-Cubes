@@ -6,7 +6,7 @@ import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
 import ForgotPassword from './pages/Auth/ForgotPassword';
 import Home from './pages/index';
-import Game from './pages/Game';
+import Game from './pages/Game/index';
 import Profile from './pages/Profile';
 import NotFound from './pages/NotFound';
 import ROUTES from './lib/routes';
