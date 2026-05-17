@@ -143,24 +143,34 @@ io.use(async (socket, next) => {
 // ─── Socket.io connections ────────────────────────────────────────────────────
 // uid → { uid, name, photoURL, x, y, z, yaw, pitch }
 const online = new Map();
+// uid → Set<socketId>  — tracks multiple devices per account
+const uidSockets = new Map();
 
 io.on('connection', (socket) => {
     const uid      = socket.user.uid;
     const name     = socket.user.name     ?? 'Unknown';
     const photoURL = socket.user.picture  ?? '';
 
-    console.log(`[+] ${name} (${uid}) connected`);
+    console.log(`[+] ${name} (${uid}) connected [${socket.id}]`);
 
-    // Send snapshot of everyone already online
+    // Track this socket under the uid
+    if (!uidSockets.has(uid)) uidSockets.set(uid, new Set());
+    uidSockets.get(uid).add(socket.id);
+
+    const alreadyOnline = online.has(uid);
+
+    // Send snapshot of everyone already online (excluding self)
     for (const [id, p] of online) {
         if (id !== uid) socket.emit('player:join', p);
     }
 
-    // Add to online map
+    // Add / update online map entry
     online.set(uid, { uid, name, photoURL, x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
 
-    // Announce arrival to others
-    socket.broadcast.emit('player:join', { uid, name, photoURL });
+    // Only announce arrival if this is the FIRST device for this uid
+    if (!alreadyOnline) {
+        socket.broadcast.emit('player:join', { uid, name, photoURL });
+    }
 
     // Position update
     socket.on('player:move', (data) => {
@@ -173,9 +183,19 @@ io.on('connection', (socket) => {
 
     // Disconnect
     socket.on('disconnect', () => {
-        online.delete(uid);
-        io.emit('player:leave', { uid });
-        console.log(`[-] ${name} (${uid}) disconnected`);
+        const sockets = uidSockets.get(uid);
+        if (sockets) {
+            sockets.delete(socket.id);
+            if (sockets.size === 0) {
+                // Last device disconnected — remove from online
+                uidSockets.delete(uid);
+                online.delete(uid);
+                io.emit('player:leave', { uid });
+                console.log(`[-] ${name} (${uid}) fully disconnected`);
+            } else {
+                console.log(`[-] ${name} (${uid}) disconnected one device, ${sockets.size} remaining`);
+            }
+        }
     });
 });
 

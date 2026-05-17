@@ -2,6 +2,33 @@ import { useEffect, useRef, useState } from 'react';
 import isMobile from '../../lib/isMobile';
 import MobileControls from './Controls/Mobile';
 
+function OnlineBar() {
+    const [count, setCount] = useState<number | null>(null);
+
+    useEffect(() => {
+        // poll the socket player list via a simple global exposed by multiplayer.ts
+        function update() {
+            const g = window as unknown as { __playerCount__?: number };
+            setCount(g.__playerCount__ ?? null);
+        }
+        update();
+        const id = setInterval(update, 2000);
+        return () => clearInterval(id);
+    }, []);
+
+    return (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none select-none">
+            <div
+                className="flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-mono text-cyan-300 border border-cyan-500/30"
+                style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', textShadow: '0 0 8px #0ff' }}
+            >
+                <span className="w-2 h-2 rounded-full bg-green-400 shadow shadow-green-400/60 animate-pulse inline-block" />
+                {count === null ? 'Connecting…' : `${count} player${count === 1 ? '' : 's'} online`}
+            </div>
+        </div>
+    );
+}
+
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [tapToStart, setTapToStart] = useState(isMobile);
@@ -38,6 +65,9 @@ export default function Game() {
             {/* Three.js canvas goes here */}
             <div ref={containerRef} className="absolute inset-0" />
             {isMobile && !tapToStart && <MobileControls />}
+
+            {/* Top-center online bar */}
+            {!tapToStart && <OnlineBar />}
 
             {/* Tap to start overlay – mobile only */}
             {tapToStart && (

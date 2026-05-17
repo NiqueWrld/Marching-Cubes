@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Noise } from './noise.js';
 import { marchChunk } from './marching-cubes.js';
 import { Auth } from './auth.js';
-import { Multiplayer, initMultiplayer } from './multiplayer.js';
+import { Multiplayer, initMultiplayer, whenConnected } from './multiplayer.js';
 import { mobileInput } from './pages/Game/Controls/Mobile/index.js';
 import isMobile from './lib/isMobile.js';
 
@@ -128,6 +128,10 @@ const RENDER = 6;
 const chunks     = new Map<string, THREE.Mesh | null | undefined>();
 const mat        = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const treeMeshes = new Map<string, THREE.Mesh[]>();
+const treeColliders = new Map<string, {
+    trunks:  { x: number; z: number; r: number; yBot: number; yTop: number }[];
+    foliage: { x: number; y: number; z: number; r: number }[];
+}>();
 const trunkMat   = new THREE.MeshLambertMaterial({ color: 0x6B3A2A });
 const foliageMat  = new THREE.MeshLambertMaterial({ color: 0x2D6A1F });
 const foliageMat2 = new THREE.MeshLambertMaterial({ color: 0x3A8A2A });
@@ -163,6 +167,8 @@ function findSurfaceInChunk(wx: number, oy: number, wz: number): number | null {
 function buildTrees(key: string, cx: number, cy: number, cz: number): void {
     if (treeMeshes.has(key)) return;
     const meshList: THREE.Mesh[] = [];
+    const trunks:  { x: number; z: number; r: number; yBot: number; yTop: number }[] = [];
+    const foliage: { x: number; y: number; z: number; r: number }[] = [];
     const ox = cx * CHUNK, oy = cy * CHUNK, oz = cz * CHUNK;
 
     for (let i = 0; i < 5; i++) {
@@ -177,11 +183,15 @@ function buildTrees(key: string, cx: number, cy: number, cz: number): void {
         const gy = densityAt(wx, sy + e, wz) - densityAt(wx, sy - e, wz);
         const gz = densityAt(wx, sy, wz + e) - densityAt(wx, sy, wz - e);
         const len = Math.sqrt(gx * gx + gy * gy + gz * gz) || 1;
-        if (gy / len < 0.72) continue;
+        // gy is negative (gradient points into solid/downward); -gy/len is the upward component
+        if (-gy / len < 0.72) continue;
 
         const trunkH   = 3.5 + seededRand(seed + 2) * 2.5;
         const foliageR = 2.2 + seededRand(seed + 3) * 1.8;
         const fMat     = seededRand(seed + 4) > 0.5 ? foliageMat : foliageMat2;
+
+        // Store collider for this trunk (slightly wider than visual for feel)
+        trunks.push({ x: wx, z: wz, r: 0.45, yBot: sy, yTop: sy + trunkH });
 
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.35, trunkH, 7), trunkMat);
         trunk.position.set(wx, sy + trunkH * 0.5, wz);
@@ -192,17 +202,19 @@ function buildTrees(key: string, cx: number, cy: number, cz: number): void {
         f1.position.set(wx, sy + trunkH + foliageR * 0.55, wz);
         f1.castShadow = true;
         scene.add(f1); meshList.push(f1);
+        foliage.push({ x: wx, y: sy + trunkH + foliageR * 0.55, z: wz, r: foliageR });
 
+        const f2x = wx + (seededRand(seed + 5) - 0.5) * foliageR;
+        const f2y = sy + trunkH + foliageR * 1.1;
+        const f2z = wz + (seededRand(seed + 6) - 0.5) * foliageR;
         const f2 = new THREE.Mesh(new THREE.SphereGeometry(foliageR * 0.7, 6, 5), fMat);
-        f2.position.set(
-            wx + (seededRand(seed + 5) - 0.5) * foliageR,
-            sy + trunkH + foliageR * 1.1,
-            wz + (seededRand(seed + 6) - 0.5) * foliageR,
-        );
+        f2.position.set(f2x, f2y, f2z);
         f2.castShadow = true;
         scene.add(f2); meshList.push(f2);
+        foliage.push({ x: f2x, y: f2y, z: f2z, r: foliageR * 0.7 });
     }
     treeMeshes.set(key, meshList);
+    treeColliders.set(key, { trunks, foliage });
 }
 
 function removeTrees(key: string): void {
@@ -211,6 +223,7 @@ function removeTrees(key: string): void {
         for (const m of list) { scene.remove(m); m.geometry.dispose(); }
         treeMeshes.delete(key);
     }
+    treeColliders.delete(key);
 }
 
 // ─── Chunk management ─────────────────────────────────────────────────────────
@@ -333,10 +346,13 @@ let playerSaveTimer = 0;
 let playerSaveFailed = false;
 let running = true;
 
+lockedMsg.classList.remove('hidden');
 lockedMsg.style.display = 'block';
-lockedMsg.textContent   = 'Loading world…';
+lockedMsg.textContent   = 'Connecting to server…';
 
 ChunkDB.open().then(async () => {
+    await whenConnected;
+    lockedMsg.textContent = 'Loading world…';
     await Auth.ready;
     let saved = Auth.getToken() ? await Auth.loadServerPosition() : null;
     if (saved) {
@@ -426,6 +442,38 @@ function animate(): void {
         onGround = true;
     } else {
         onGround = densityAt(px, feetY - 0.25, pz) > ISO;
+    }
+
+    // ── Tree trunk collision (vertical cylinder) ─────────────────────────────
+    const playerR = 0.35;
+    for (const col of treeColliders.values()) {
+        for (const c of col.trunks) {
+            if (camera.position.y < c.yBot || camera.position.y - EYE_HEIGHT > c.yTop) continue;
+            const dx = camera.position.x - c.x;
+            const dz = camera.position.z - c.z;
+            const dist2 = dx * dx + dz * dz;
+            const minDist = c.r + playerR;
+            if (dist2 < minDist * minDist && dist2 > 0) {
+                const dist = Math.sqrt(dist2);
+                const push = (minDist - dist) / dist;
+                camera.position.x += dx * push;
+                camera.position.z += dz * push;
+            }
+        }
+        for (const c of col.foliage) {
+            const dx = camera.position.x - c.x;
+            const dy = camera.position.y - c.y;
+            const dz = camera.position.z - c.z;
+            const dist2 = dx * dx + dy * dy + dz * dz;
+            const minDist = c.r + playerR;
+            if (dist2 < minDist * minDist && dist2 > 0) {
+                const dist = Math.sqrt(dist2);
+                const push = (minDist - dist) / dist;
+                camera.position.x += dx * push;
+                camera.position.y += dy * push;
+                camera.position.z += dz * push;
+            }
+        }
     }
 
     updateChunks();

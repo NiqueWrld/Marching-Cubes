@@ -63,13 +63,12 @@ function makePlayerMesh(name: string): THREE.Group {
 // ── Socket connection ─────────────────────────────────────────────────────────
 let socket: Socket | null = null;
 
+let _resolveConnected: () => void;
+export const whenConnected: Promise<void> = new Promise(res => { _resolveConnected = res; });
+
 function connect(token: string): void {
     if (socket) socket.disconnect();
     socket = io({ auth: { token } });
-
-    socket.on('connect', () => {
-        console.log('[Multiplayer] Connected as', Auth.getUser()?.displayName);
-    });
 
     socket.on('connect_error', (err: Error) => {
         console.warn('[Multiplayer] Connection error:', err.message);
@@ -80,6 +79,7 @@ function connect(token: string): void {
         const mesh = makePlayerMesh(name ?? 'Player');
         _scene.add(mesh);
         remotePlayers.set(uid, { mesh, name });
+        (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
     });
 
     socket.on('player:move', ({ uid, x, y, z, yaw }: { uid: string; x: number; y: number; z: number; yaw: number; pitch: number }) => {
@@ -98,10 +98,18 @@ function connect(token: string): void {
             entry.mesh.traverse(o => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
         }
         remotePlayers.delete(uid);
+        (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
+    });
+
+    socket.on('connect', () => {
+        console.log('[Multiplayer] Connected as', Auth.getUser()?.displayName);
+        (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
+        _resolveConnected();
     });
 
     socket.on('disconnect', () => {
         console.log('[Multiplayer] Disconnected');
+        (window as unknown as Record<string, unknown>).__playerCount__ = null;
     });
 }
 
