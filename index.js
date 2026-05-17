@@ -40,14 +40,11 @@ const io     = new Server(server, {
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Serve static files – public/ for pages, root for js/ and other assets
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(__dirname)));
-
-// Explicit root → main game page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'pages', 'index.html'));
-});
+// Serve built frontend
+const DIST_DIR = path.join(__dirname, 'dist');
+// redirect:false prevents /game → /game/ redirect that would serve game/index.html
+// (a standalone page that never calls startGame) instead of the React SPA.
+app.use(express.static(DIST_DIR, { redirect: false }));
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 async function verifyToken(req, res, next) {
@@ -64,13 +61,20 @@ async function verifyToken(req, res, next) {
     }
 }
 
+// ─── REST: server capabilities ───────────────────────────────────────────────
+app.get('/api/status', (req, res) => {
+    res.json({ auth: !!admin, db: !!db });
+});
+
 // ─── REST: player position ────────────────────────────────────────────────────
 app.get('/api/player', verifyToken, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not configured' });
     const snap = await db.ref(`players/${req.user.uid}/state`).once('value');
     res.json(snap.val() || null);
 });
 
 app.post('/api/player', verifyToken, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not configured' });
     const { x, y, z, yaw, pitch } = req.body;
     if ([x, y, z, yaw, pitch].some(v => typeof v !== 'number')) {
         return res.status(400).json({ error: 'Invalid body' });
@@ -158,6 +162,16 @@ io.on('connection', (socket) => {
         io.emit('player:leave', { uid });
         console.log(`[-] ${name} (${uid}) disconnected`);
     });
+});
+
+// ─── SPA fallback ───────────────────────────────────────────────────────────
+// Must be after all API routes so it only catches unmatched routes
+app.get('*', (req, res) => {
+    const indexFile = path.join(DIST_DIR, 'index.html');
+    if (!fs.existsSync(indexFile)) {
+        return res.status(503).send('Frontend not built. Run: npm run build');
+    }
+    res.sendFile(indexFile);
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────

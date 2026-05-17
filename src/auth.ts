@@ -12,6 +12,13 @@ export const Auth = (() => {
     let _user:    User | null   = null;
     let _token:   string | null = null;
     let _onReady!: () => void;
+    let _serverDbAvailable = false; // determined by /api/status check
+
+    // Check server capabilities once at startup
+    fetch('/api/status')
+        .then(r => r.json())
+        .then((s: { db: boolean }) => { _serverDbAvailable = !!s.db; })
+        .catch(() => {});
 
     const ready = new Promise<void>(resolve => { _onReady = resolve; });
 
@@ -36,15 +43,13 @@ export const Auth = (() => {
         const userPhoto  = document.getElementById('user-photo')   as HTMLImageElement | null;
 
         if (_user) {
-            if (signInBtn)  signInBtn.style.display  = 'none';
-            if (signOutBtn) signOutBtn.style.display = '';
-            if (userInfo)   userInfo.style.display   = '';
+            signInBtn?.classList.add('hidden');
+            userInfo?.classList.remove('hidden');
             if (userName)   userName.textContent = _user.displayName ?? _user.email ?? 'Player';
             if (userPhoto && _user.photoURL) userPhoto.src = _user.photoURL;
         } else {
-            if (signInBtn)  signInBtn.style.display  = '';
-            if (signOutBtn) signOutBtn.style.display = 'none';
-            if (userInfo)   userInfo.style.display   = 'none';
+            signInBtn?.classList.remove('hidden');
+            userInfo?.classList.add('hidden');
         }
     }
 
@@ -61,11 +66,12 @@ export const Auth = (() => {
     }
 
     async function loadServerPosition(): Promise<PlayerPosition | null> {
-        if (!_token) return null;
+        if (!_token || !_serverDbAvailable) return null;
         try {
             const res = await fetch('/api/player', {
                 headers: { Authorization: `Bearer ${_token}` },
             });
+            if (res.status === 503) { _serverDbAvailable = false; return null; }
             if (!res.ok) return null;
             return await res.json() as PlayerPosition;
         } catch {
@@ -73,13 +79,13 @@ export const Auth = (() => {
         }
     }
 
-    function saveServerPosition(x: number, y: number, z: number, yaw: number, pitch: number): void {
-        if (!_token) return;
-        fetch('/api/player', {
+    function saveServerPosition(x: number, y: number, z: number, yaw: number, pitch: number): Promise<void> {
+        if (!_token || !_serverDbAvailable) return Promise.resolve();
+        return fetch('/api/player', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_token}` },
             body:    JSON.stringify({ x, y, z, yaw, pitch }),
-        }).catch(() => {});
+        }).then(res => { if (!res.ok) return Promise.reject(res.status); });
     }
 
     return {

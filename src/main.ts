@@ -324,9 +324,10 @@ document.getElementById('sign-out-btn')?.addEventListener('click', () => Auth.si
 initMultiplayer(scene);
 
 // ─── Render loop ──────────────────────────────────────────────────────────────
-const clock  = new THREE.Clock();
+const clock  = new THREE.Timer();
 const euler  = new THREE.Euler(0, 0, 0, 'YXZ');
 let playerSaveTimer = 0;
+let playerSaveFailed = false;
 let running = true;
 
 lockedMsg.style.display = 'block';
@@ -335,7 +336,6 @@ lockedMsg.textContent   = 'Loading world…';
 ChunkDB.open().then(async () => {
     await Auth.ready;
     let saved = Auth.getToken() ? await Auth.loadServerPosition() : null;
-    if (!saved) saved = await ChunkDB.get('__player__') as typeof saved;
     if (saved) {
         camera.position.set(saved.x, saved.y, saved.z);
         yaw   = saved.yaw;
@@ -412,9 +412,9 @@ function animate(): void {
     posEl.textContent = `Position: ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
 
     playerSaveTimer += dt;
-    if (playerSaveTimer >= 2) {
+    if (playerSaveTimer >= 2 && !playerSaveFailed) {
         playerSaveTimer = 0;
-        Auth.saveServerPosition(p.x, p.y, p.z, yaw, pitch);
+        Auth.saveServerPosition(p.x, p.y, p.z, yaw, pitch).catch(() => { playerSaveFailed = true; });
     }
 
     Multiplayer.tick(dt, camera, yaw, pitch);

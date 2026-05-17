@@ -4,11 +4,11 @@
   "description": "Multiplayer server for Marching Cubes World",
   "main": "index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite build && nodemon index.js",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "cross-env NODE_ENV=production node index.js",
-    "server:dev": "nodemon index.js"
+    "vite": "vite",
+    "server": "cross-env NODE_ENV=production node index.js"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
