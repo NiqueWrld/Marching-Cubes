@@ -81,10 +81,7 @@ const waterMat = new THREE.ShaderMaterial({
         }
     `,
 });
-const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000, 120, 120), waterMat);
-waterMesh.rotation.x = -Math.PI / 2;
-waterMesh.position.y = WATER_LEVEL;
-scene.add(waterMesh);
+
 
 // ─── Chunk cache (server JSON files) ─────────────────────────────────────────
 interface ChunkData {
@@ -124,7 +121,13 @@ const ChunkDB = (() => {
 const noise  = new Noise(12345);
 const ISO    = 0.0;
 const CHUNK  = 16;
-const RENDER = 6;
+const RENDER = 12;
+
+const WATER_SIZE = RENDER * CHUNK * 2 + CHUNK;
+const waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(WATER_SIZE, WATER_SIZE, 40, 40), waterMat);
+waterMesh.rotation.x = -Math.PI / 2;
+waterMesh.position.y = WATER_LEVEL;
+scene.add(waterMesh);
 
 const chunks     = new Map<string, THREE.Mesh | null | undefined>();
 const mat        = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -256,12 +259,10 @@ async function buildChunk(cx: number, cy: number, cz: number): Promise<void> {
     const { verts, norms, cols } = marchChunk(densityAt, ox, oy, oz, CHUNK, ISO);
     if (verts.length === 0) {
         chunks.set(key, null);
-        ChunkDB.put(key, { empty: true });
         return;
     }
     spawnMesh(key, verts, norms, cols);
     buildTrees(key, cx, cy, cz);
-    ChunkDB.put(key, { empty: false, verts: Array.from(verts), norms: Array.from(norms), cols: Array.from(cols) });
 }
 
 function removeChunk(key: string): void {
@@ -281,13 +282,13 @@ function updateChunks(): void {
 
     for (const key of chunks.keys()) {
         const [kx, ky, kz] = key.split(',').map(Number);
-        if (Math.abs(kx - cx) > RENDER + 1 || Math.abs(ky - cy) > RENDER + 1 || Math.abs(kz - cz) > RENDER + 1)
+        if (Math.abs(kx - cx) > RENDER + 1 || Math.abs(ky - cy) > 2 || Math.abs(kz - cz) > RENDER + 1)
             removeChunk(key);
     }
 
     const queue: [number, number, number, number][] = [];
     for (let dx = -RENDER; dx <= RENDER; dx++)
-    for (let dy = -2; dy <= RENDER; dy++)
+    for (let dy = -1; dy <= 1; dy++)
     for (let dz = -RENDER; dz <= RENDER; dz++) {
         const key = `${cx + dx},${cy + dy},${cz + dz}`;
         if (!chunks.has(key)) queue.push([cx + dx, cy + dy, cz + dz, dx * dx + dy * dy + dz * dz]);
@@ -372,7 +373,7 @@ ChunkDB.open().then(async () => {
     const cz = Math.floor(camera.position.z / CHUNK);
     const queue: [number, number, number, number][] = [];
     for (let dx = -RENDER; dx <= RENDER; dx++)
-    for (let dy = -2; dy <= RENDER; dy++)
+    for (let dy = -1; dy <= 1; dy++)
     for (let dz = -RENDER; dz <= RENDER; dz++)
         queue.push([cx + dx, cy + dy, cz + dz, dx * dx + dy * dy + dz * dz]);
     queue.sort((a, b) => a[3] - b[3]);
@@ -409,6 +410,8 @@ function animate(): void {
         pitch = spectatorTarget.pitch;
         euler.set(pitch, yaw, 0);
         camera.quaternion.setFromEuler(euler);
+        waterMesh.position.x = camera.position.x;
+        waterMesh.position.z = camera.position.z;
         waterUniforms.uTime.value += dt;
         renderer.render(scene, camera);
         return;
@@ -504,6 +507,8 @@ function animate(): void {
     }
 
     Multiplayer.tick(dt, camera, yaw, pitch);
+    waterMesh.position.x = camera.position.x;
+    waterMesh.position.z = camera.position.z;
     waterUniforms.uTime.value += dt;
     renderer.render(scene, camera);
 }
