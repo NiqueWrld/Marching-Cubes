@@ -1,13 +1,11 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "pnpm build",
   "outputDirectory": "dist",
   "installCommand": "pnpm install --no-frozen-lockfile",
-  "framework": null,
   "cleanUrls": true,
   "rewrites": [
     { "source": "/game", "destination": "/game/index.html" },
     { "source": "/game/:path*", "destination": "/game/index.html" },
-    { "source": "/((?!assets/|world/|.*\\..*).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
