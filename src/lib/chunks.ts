@@ -56,7 +56,45 @@ async function cachePut(entry: CachedWorld): Promise<void> {
 let worldMesh: THREE.Object3D | null = null;
 let worldLoad: Promise<THREE.Object3D> | null = null;
 
+// Reveal shader — terrain fragments outside `uRadius` (xz distance from
+// `uOrigin`) are discarded, so the world appears to flow outward from the
+// player's spawn. Driven by `tickReveal()` each frame.
+const revealUniforms = {
+    uOrigin: { value: new THREE.Vector3(0, 0, 0) },
+    uRadius: { value: 0 },
+};
+let revealTargetRadius = 0;
+const REVEAL_SPEED = 80; // world units per second
+
+export function startReveal(origin: THREE.Vector3, targetRadius = 600): void {
+    revealUniforms.uOrigin.value.copy(origin);
+    revealUniforms.uRadius.value = 0;
+    revealTargetRadius = targetRadius;
+}
+export function tickReveal(dt: number): void {
+    if (revealUniforms.uRadius.value < revealTargetRadius) {
+        revealUniforms.uRadius.value = Math.min(
+            revealTargetRadius,
+            revealUniforms.uRadius.value + REVEAL_SPEED * dt,
+        );
+    }
+}
+
 const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+terrainMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uOrigin = revealUniforms.uOrigin;
+    shader.uniforms.uRadius = revealUniforms.uRadius;
+    shader.vertexShader = 'varying vec3 vRevealWorldPos;\n' + shader.vertexShader.replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\n  vRevealWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;',
+    );
+    shader.fragmentShader =
+        'uniform vec3 uOrigin;\nuniform float uRadius;\nvarying vec3 vRevealWorldPos;\n' +
+        shader.fragmentShader.replace(
+            '#include <opaque_fragment>',
+            'if (distance(vRevealWorldPos.xz, uOrigin.xz) > uRadius) discard;\n  #include <opaque_fragment>',
+        );
+};
 
 function postProcess(obj: THREE.Object3D, t0: number): void {
     const dt = ((performance.now() - t0) / 1000).toFixed(1);

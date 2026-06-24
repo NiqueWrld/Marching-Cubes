@@ -8,7 +8,7 @@ import { CHUNK, ISO } from './lib/worldConstants.js';
 import { densityAt } from './lib/terrain.js';
 import { createWater } from './lib/water.js';
 import { ChunkDB } from './lib/chunkDB.js';
-import { loadInitialChunks, updateChunks, worldColliders } from './lib/chunks.js';
+import { loadInitialChunks, updateChunks, worldColliders, startReveal, tickReveal } from './lib/chunks.js';
 import { treeColliders } from './lib/trees.js';
 
 export function startGame(container: HTMLElement): () => void {
@@ -153,6 +153,8 @@ ChunkDB.open().then(async () => {
                 }
             }
         }
+        // Kick off the radial reveal from the player's feet.
+        startReveal(camera.position);
     } catch (err) {
         console.error('[Game] World initialisation step failed:', err);
         lockedText.textContent = `Failed to load world: ${(err as Error)?.message ?? err}`;
@@ -180,6 +182,7 @@ function animate(): void {
     requestAnimationFrame(animate);
     clock.update();
     const dt = Math.min(clock.getDelta(), 0.05);
+    tickReveal(dt);
 
     const now = performance.now();
     if (now - _lastCoordLog > 500) {
