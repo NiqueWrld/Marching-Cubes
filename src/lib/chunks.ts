@@ -11,40 +11,50 @@ import { buildTrees } from './trees.js';
 
 export const worldColliders: THREE.Mesh[] = [];
 
-const WORLD_OBJ_URL = '/world.obj';
+const WORLD_DIR_URL = '/world/';
+const MANIFEST_URL  = WORLD_DIR_URL + 'manifest.json';
 const IDB_NAME  = 'world-cache';
 const IDB_STORE = 'files';
-const IDB_KEY   = WORLD_OBJ_URL;
+const CACHE_VERSION = 'v2-tiles';
 
-interface CachedWorld {
+interface CachedTile {
     text: string;
     size: number;
     lastModified: string;
+    version: string;
 }
+interface ManifestTile {
+    file: string; tx: number; tz: number; bytes: number; tris: number;
+    bbox: [number, number, number, number, number, number];
+}
+interface Manifest { seed: number; chunk: number; tile: number; tiles: ManifestTile[]; }
 
 function openCache(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
-        req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+        const req = indexedDB.open(IDB_NAME, 2);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror   = () => reject(req.error);
     });
 }
-async function cacheGet(): Promise<CachedWorld | null> {
+async function cacheGet(key: string): Promise<CachedTile | null> {
     try {
         const db = await openCache();
-        return await new Promise<CachedWorld | null>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(IDB_KEY);
-            tx.onsuccess = () => resolve((tx.result as CachedWorld | undefined) ?? null);
+        return await new Promise<CachedTile | null>((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
+            tx.onsuccess = () => resolve((tx.result as CachedTile | undefined) ?? null);
             tx.onerror   = () => reject(tx.error);
         });
     } catch { return null; }
 }
-async function cachePut(entry: CachedWorld): Promise<void> {
+async function cachePut(key: string, entry: CachedTile): Promise<void> {
     try {
         const db = await openCache();
         await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(entry, IDB_KEY);
+            const tx = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(entry, key);
             tx.onsuccess = () => resolve();
             tx.onerror   = () => reject(tx.error);
         });
@@ -52,9 +62,6 @@ async function cachePut(entry: CachedWorld): Promise<void> {
         console.warn('[World] cache write failed:', err);
     }
 }
-
-let worldMesh: THREE.Object3D | null = null;
-let worldLoad: Promise<THREE.Object3D> | null = null;
 
 // Reveal shader — terrain fragments outside `uRadius` (xz distance from
 // `uOrigin`) are discarded, so the world appears to flow outward from the
@@ -96,9 +103,7 @@ terrainMat.onBeforeCompile = (shader) => {
         );
 };
 
-function postProcess(obj: THREE.Object3D, t0: number): void {
-    const dt = ((performance.now() - t0) / 1000).toFixed(1);
-    let meshCount = 0, triCount = 0;
+function processTileObj(obj: THREE.Object3D, scene: THREE.Scene): void {
     obj.traverse((child) => {
         const m = child as THREE.Mesh;
         if (!m.isMesh) return;
@@ -116,108 +121,35 @@ function postProcess(obj: THREE.Object3D, t0: number): void {
             m.frustumCulled = true;
             m.castShadow = true;
             m.receiveShadow = true;
-            meshCount++;
-            const pos = geo.getAttribute('position');
-            if (pos) triCount += pos.count / 3;
         } catch (err) {
-            console.error('[World] Failed processing mesh', m.name, err);
+            console.error('[World] Failed processing tile mesh', err);
         }
     });
-    console.log(`[World] Ready in ${dt}s — ${meshCount} mesh(es), ${triCount} tris`);
+    scene.add(obj);
 }
 
-async function fetchAndCache(
-    setProgress: (loaded: number, total: number) => void,
-    setStatus: (msg: string) => void,
+async function fetchTileText(
+    url: string,
+    expectedBytes: number,
 ): Promise<string> {
-    setStatus('Downloading world…');
-    const res = await fetch(WORLD_OBJ_URL);
-    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} fetching world.obj`);
-    const total = Number(res.headers.get('content-length')) || 0;
-    const lastModified = res.headers.get('last-modified') || '';
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let loaded = 0;
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        setProgress(loaded, total);
-    }
-    setStatus('Parsing mesh…');
-    const blob = new Blob(chunks);
-    const text = await blob.text();
-    void cachePut({ text, size: text.length, lastModified });
-    return text;
-}
-
-function loadWorldOnce(): Promise<THREE.Object3D> {
-    if (worldLoad) return worldLoad;
-
-    const bar   = document.getElementById('world-progress-bar') as HTMLElement | null;
-    const label = document.getElementById('world-progress-label') as HTMLElement | null;
-    const wrap  = document.getElementById('world-progress') as HTMLElement | null;
-    if (wrap) wrap.style.display = '';
-
-    function setProgress(loaded: number, total: number) {
-        const pct = total > 0 ? (loaded / total) * 100 : 0;
-        if (bar)   bar.style.width = `${pct.toFixed(1)}%`;
-        if (label) label.textContent = total > 0
-            ? `${pct.toFixed(0)}%   ${(loaded / 1e6).toFixed(1)} / ${(total / 1e6).toFixed(1)} MB`
-            : `${(loaded / 1e6).toFixed(1)} MB`;
-    }
-    function setStatus(msg: string) {
-        if (label) label.textContent = msg;
-    }
-
-    worldLoad = (async () => {
-        const t0 = performance.now();
-
-        // 1. Cache lookup, validated against server HEAD (size + last-modified).
-        let text: string | null = null;
-        try {
-            const cached = await cacheGet();
-            if (cached) {
-                setStatus('Validating cached world…');
-                let valid = true;
-                try {
-                    const head = await fetch(WORLD_OBJ_URL, { method: 'HEAD' });
-                    const size = Number(head.headers.get('content-length')) || 0;
-                    const lastModified = head.headers.get('last-modified') || '';
-                    if (size && size !== cached.size) valid = false;
-                    if (lastModified && lastModified !== cached.lastModified) valid = false;
-                } catch {
-                    // HEAD failed (offline?) — accept the cached copy.
-                }
-                if (valid) {
-                    console.log(`[World] Using cached OBJ (${(cached.size / 1e6).toFixed(1)} MB)`);
-                    setStatus('Parsing cached mesh…');
-                    text = cached.text;
-                }
-            }
-        } catch (err) {
-            console.warn('[World] Cache check failed:', err);
+    // Try cache first (validated by byte size from manifest).
+    try {
+        const cached = await cacheGet(url);
+        if (cached && cached.version === CACHE_VERSION && cached.size === expectedBytes) {
+            return cached.text;
         }
+    } catch { /* fall through */ }
 
-        // 2. Otherwise download fresh.
-        if (text === null) {
-            text = await fetchAndCache(setProgress, setStatus);
-        }
-
-        // 3. Parse on the main thread (yield first so the UI can repaint).
-        await new Promise(r => setTimeout(r, 0));
-        const obj = new OBJLoader().parse(text);
-        postProcess(obj, t0);
-        if (wrap) wrap.style.display = 'none';
-        return obj;
-    })();
-
-    worldLoad.catch(err => {
-        console.error('[World] load failed:', err);
-        if (label) label.textContent = 'Failed to load world';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+    const text = await res.text();
+    void cachePut(url, {
+        text,
+        size: text.length,
+        lastModified: res.headers.get('last-modified') || '',
+        version: CACHE_VERSION,
     });
-    return worldLoad;
+    return text;
 }
 
 /** Streaming update is a no-op: the whole world is one baked mesh. */
@@ -225,39 +157,92 @@ export function updateChunks(_scene: THREE.Scene, _camera: THREE.Camera): void {
     /* baked world — nothing to stream */
 }
 
-/** Load the baked OBJ, add it to the scene, then place trees over the visible region. */
+/**
+ * Load tiles in parallel from `/world/`, adding each to the scene as it
+ * arrives so the world fills in around the player. `onReady` fires as soon
+ * as the nearest tile is in the scene so physics can start.
+ */
 export async function loadInitialChunks(
     scene: THREE.Scene,
     camera: THREE.Camera,
     onReady: () => void,
 ): Promise<void> {
+    const bar   = document.getElementById('world-progress-bar') as HTMLElement | null;
+    const label = document.getElementById('world-progress-label') as HTMLElement | null;
+    const wrap  = document.getElementById('world-progress') as HTMLElement | null;
+    if (wrap) wrap.style.display = '';
+    if (label) label.textContent = 'Loading world…';
+
+    const t0 = performance.now();
+    let manifest: Manifest;
     try {
-        const obj = await loadWorldOnce();
-        if (!worldMesh) {
-            worldMesh = obj;
-        }
-        // Always make sure it's parented to *this* scene (handles HMR/restarts).
-        if (worldMesh.parent !== scene) {
-            scene.add(worldMesh);
-        }
-        console.log('[World] scene.children =', scene.children.length,
-                    'worldMesh in scene =', worldMesh.parent === scene,
-                    'worldMesh visible =', worldMesh.visible);
-        worldMesh.traverse(o => {
-            const m = o as THREE.Mesh;
-            if (m.isMesh) {
-                console.log('[World] mesh in scene — visible=', m.visible,
-                            'matrixWorld pos=', new THREE.Vector3().setFromMatrixPosition(m.matrixWorld).toArray(),
-                            'material=', (m.material as THREE.Material).type);
-            }
-        });
+        const res = await fetch(MANIFEST_URL, { cache: 'no-cache' });
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching manifest`);
+        manifest = await res.json();
     } catch (err) {
-        console.error('[World] Failed to load baked OBJ:', err);
+        console.error('[World] Failed to load manifest:', err);
+        if (label) label.textContent = 'Failed to load world';
         throw err;
     }
-    onReady();
 
-    // Spawn trees over the visible chunk grid around the player
+    // Sort tiles nearest-first from spawn (camera.position.xz).
+    const px = camera.position.x, pz = camera.position.z;
+    const tiles = manifest.tiles.slice().sort((a, b) => {
+        const acx = (a.bbox[0] + a.bbox[3]) * 0.5, acz = (a.bbox[2] + a.bbox[5]) * 0.5;
+        const bcx = (b.bbox[0] + b.bbox[3]) * 0.5, bcz = (b.bbox[2] + b.bbox[5]) * 0.5;
+        const da = (acx - px) ** 2 + (acz - pz) ** 2;
+        const db = (bcx - px) ** 2 + (bcz - pz) ** 2;
+        return da - db;
+    });
+
+    const total = tiles.length;
+    let done = 0;
+    let readyFired = false;
+    const loader = new OBJLoader();
+    const CONCURRENCY = 6;
+
+    function updateProgress() {
+        const pct = (done / total) * 100;
+        if (bar)   bar.style.width = `${pct.toFixed(1)}%`;
+        if (label) label.textContent = `${done} / ${total} tiles`;
+    }
+    updateProgress();
+
+    async function loadOne(t: ManifestTile) {
+        try {
+            const text = await fetchTileText(WORLD_DIR_URL + t.file, t.bytes);
+            const obj = loader.parse(text);
+            obj.name = t.file;
+            processTileObj(obj, scene);
+        } catch (err) {
+            console.error(`[World] tile ${t.file} failed:`, err);
+        } finally {
+            done++;
+            updateProgress();
+            if (!readyFired && done >= 1) {
+                readyFired = true;
+                onReady();
+            }
+        }
+    }
+
+    // Worker-pool style: keep CONCURRENCY downloads in flight at all times.
+    let next = 0;
+    async function worker() {
+        while (next < tiles.length) {
+            const idx = next++;
+            await loadOne(tiles[idx]);
+        }
+    }
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+    await Promise.all(workers);
+
+    const dt = ((performance.now() - t0) / 1000).toFixed(1);
+    console.log(`[World] All ${total} tiles loaded in ${dt}s — ${worldColliders.length} meshes`);
+    if (wrap) wrap.style.display = 'none';
+
+    // Spawn trees over the visible chunk grid around the player.
     const cx = Math.floor(camera.position.x / CHUNK);
     const cz = Math.floor(camera.position.z / CHUNK);
     const R2 = RENDER * RENDER;

@@ -10,17 +10,22 @@ int centerX  = GetIntArg("--cx", 0);
 int centerZ  = GetIntArg("--cz", 0);
 int seed     = GetIntArg("--seed", 12345);
 int chunkSz  = GetIntArg("--chunk", 16);
+int tileSize = GetIntArg("--tile", 4);   // chunk-columns per tile (NxN)
 double iso   = GetDoubleArg("--iso", 0.0);
 
 string repoRoot = FindRepoRoot();
 string mcFile   = Path.Combine(repoRoot, "src", "marching-cubes.ts");
-string outFile  = GetStringArg("--out", Path.Combine(repoRoot, "public", "world.obj"));
-Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
+string outDir   = GetStringArg("--out-dir", Path.Combine(repoRoot, "public", "world"));
+if (Directory.Exists(outDir))
+{
+    foreach (var f in Directory.EnumerateFiles(outDir, "*.obj")) File.Delete(f);
+}
+Directory.CreateDirectory(outDir);
 
-Console.WriteLine($"Repo:   {repoRoot}");
-Console.WriteLine($"Output: {outFile}");
-Console.WriteLine($"Range:  x=[{centerX - radius}..{centerX + radius}] z=[{centerZ - radius}..{centerZ + radius}] y=[{yMin}..{yMax}]");
-Console.WriteLine($"Seed={seed} chunk={chunkSz} iso={iso}");
+Console.WriteLine($"Repo:    {repoRoot}");
+Console.WriteLine($"OutDir:  {outDir}");
+Console.WriteLine($"Range:   x=[{centerX - radius}..{centerX + radius}] z=[{centerZ - radius}..{centerZ + radius}] y=[{yMin}..{yMax}]");
+Console.WriteLine($"Seed={seed} chunk={chunkSz} tile={tileSize} iso={iso}");
 
 var (edgeTable, triTable) = TableLoader.Load(mcFile);
 Console.WriteLine($"Loaded edgeTable[{edgeTable.Length}] triTable[{triTable.Length}]");
@@ -48,15 +53,12 @@ int doneChunks = 0;
 long totalTris = 0;
 var sw = System.Diagnostics.Stopwatch.StartNew();
 
-using var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write, FileShare.Read, 1 << 20);
-using var w  = new StreamWriter(fs) { NewLine = "\n" };
 var inv = CultureInfo.InvariantCulture;
 
-w.WriteLine("# Baked Marching-Cubes world");
-w.WriteLine($"# radius={radius} y=[{yMin}..{yMax}] seed={seed} chunk={chunkSz} iso={iso}");
-w.WriteLine("o World");
+// One OBJ per tile (tileSize × tileSize chunk columns), with full y-stack inside.
+var tileWriters = new Dictionary<(int tx, int tz), TileWriter>();
 
-int vertexBase = 1; // OBJ indices are 1-based
+static int FloorDiv(int a, int b) => (a >= 0) ? a / b : -((-a + b - 1) / b);
 
 for (int cx = centerX - radius; cx <= centerX + radius; cx++)
 for (int cz = centerZ - radius; cz <= centerZ + radius; cz++)
@@ -70,20 +72,31 @@ for (int cy = yMin; cy <= yMax; cy++)
     int triCount = r.Verts.Count / 9;
     totalTris += triCount;
 
-    // Vertices with per-vertex color (v x y z r g b — Three.js OBJLoader supports this)
+    int tx = FloorDiv(cx, tileSize);
+    int tz = FloorDiv(cz, tileSize);
+    var key = (tx, tz);
+    if (!tileWriters.TryGetValue(key, out var t))
+    {
+        t = new TileWriter(outDir, tx, tz);
+        tileWriters[key] = t;
+    }
+    var w = t.W;
+
     for (int i = 0; i < r.Verts.Count; i += 3)
     {
-        int ci = i;
+        double vx = r.Verts[i], vy = r.Verts[i + 1], vz = r.Verts[i + 2];
+        if (vx < t.MinX) t.MinX = vx; if (vx > t.MaxX) t.MaxX = vx;
+        if (vy < t.MinY) t.MinY = vy; if (vy > t.MaxY) t.MaxY = vy;
+        if (vz < t.MinZ) t.MinZ = vz; if (vz > t.MaxZ) t.MaxZ = vz;
         w.Write("v ");
-        w.Write(r.Verts[i    ].ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Verts[i + 1].ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Verts[i + 2].ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Cols [ci   ].ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Cols [ci + 1].ToString("F4", inv)); w.Write(' ');
-        w.WriteLine(r.Cols[ci + 2].ToString("F4", inv));
+        w.Write(vx.ToString("F4", inv)); w.Write(' ');
+        w.Write(vy.ToString("F4", inv)); w.Write(' ');
+        w.Write(vz.ToString("F4", inv)); w.Write(' ');
+        w.Write(r.Cols[i    ].ToString("F4", inv)); w.Write(' ');
+        w.Write(r.Cols[i + 1].ToString("F4", inv)); w.Write(' ');
+        w.WriteLine(r.Cols[i + 2].ToString("F4", inv));
     }
 
-    // Normals
     for (int i = 0; i < r.Norms.Count; i += 3)
     {
         w.Write("vn ");
@@ -92,24 +105,48 @@ for (int cy = yMin; cy <= yMax; cy++)
         w.WriteLine(r.Norms[i + 2].ToString("F5", inv));
     }
 
-    // Faces: every 3 vertices is one triangle, indices match vertex/normal arrays
     int vCount = r.Verts.Count / 3;
     for (int i = 0; i < vCount; i += 3)
     {
-        int a = vertexBase + i, b = a + 1, c = a + 2;
+        int a = t.VBase + i, b = a + 1, c = a + 2;
         w.Write("f "); w.Write(a); w.Write("//"); w.Write(a); w.Write(' ');
         w.Write(b);    w.Write("//"); w.Write(b); w.Write(' ');
         w.Write(c);    w.Write("//"); w.WriteLine(c);
     }
-    vertexBase += vCount;
+    t.VBase += vCount;
+    t.Tris  += triCount;
 
     Progress();
 }
 
-w.Flush();
+// Flush and build manifest.
+var manifest = new StringBuilder();
+manifest.AppendLine("{");
+manifest.AppendLine($"  \"seed\": {seed}, \"chunk\": {chunkSz}, \"tile\": {tileSize},");
+manifest.AppendLine("  \"tiles\": [");
+bool first = true;
+long totalBytes = 0;
+foreach (var (key, t) in tileWriters)
+{
+    t.W.Flush();
+    long len = t.Fs.Length;
+    totalBytes += len;
+    t.W.Dispose();
+    t.Fs.Dispose();
+    string name = $"tile_{key.tx}_{key.tz}.obj";
+    if (!first) manifest.AppendLine(",");
+    first = false;
+    manifest.Append($"    {{ \"file\": \"{name}\", \"tx\": {key.tx}, \"tz\": {key.tz}, \"bytes\": {len}, \"tris\": {t.Tris}, ");
+    manifest.Append($"\"bbox\": [{t.MinX.ToString("F2", inv)}, {t.MinY.ToString("F2", inv)}, {t.MinZ.ToString("F2", inv)}, {t.MaxX.ToString("F2", inv)}, {t.MaxY.ToString("F2", inv)}, {t.MaxZ.ToString("F2", inv)}] }}");
+}
+manifest.AppendLine();
+manifest.AppendLine("  ]");
+manifest.AppendLine("}");
+File.WriteAllText(Path.Combine(outDir, "manifest.json"), manifest.ToString());
+
 sw.Stop();
 Console.WriteLine();
-Console.WriteLine($"Done. chunks={doneChunks} triangles={totalTris:N0} bytes={fs.Length:N0} in {sw.Elapsed.TotalSeconds:F1}s");
+Console.WriteLine($"Done. chunks={doneChunks} tiles={tileWriters.Count} triangles={totalTris:N0} bytes={totalBytes:N0} in {sw.Elapsed.TotalSeconds:F1}s");
 
 void Progress()
 {
@@ -130,6 +167,25 @@ static string FindRepoRoot()
 }
 
 // ─── Noise (port of src/noise.js) ────────────────────────────────────────────
+class TileWriter
+{
+    public StreamWriter W;
+    public FileStream Fs;
+    public int VBase = 1;
+    public long Tris = 0;
+    public double MinX = double.PositiveInfinity, MaxX = double.NegativeInfinity;
+    public double MinY = double.PositiveInfinity, MaxY = double.NegativeInfinity;
+    public double MinZ = double.PositiveInfinity, MaxZ = double.NegativeInfinity;
+    public TileWriter(string outDir, int tx, int tz)
+    {
+        string path = Path.Combine(outDir, $"tile_{tx}_{tz}.obj");
+        Fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read, 1 << 20);
+        W  = new StreamWriter(Fs) { NewLine = "\n" };
+        W.WriteLine($"# Baked tile tx={tx} tz={tz}");
+        W.WriteLine($"o Tile_{tx}_{tz}");
+    }
+}
+
 class Noise
 {
     readonly byte[] p = new byte[512];
