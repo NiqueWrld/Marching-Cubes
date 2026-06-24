@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Zulu Wars</string>
-    <string name="title_activity_main">Zulu Wars</string>
-    <string name="package_name">com.zuluwars.app</string>
-    <string name="custom_url_scheme">com.zuluwars.app</string>
-</resources>

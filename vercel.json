@@ -4,8 +4,6 @@
   "installCommand": "pnpm install --no-frozen-lockfile",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/game", "destination": "/game/index.html" },
-    { "source": "/game/:path*", "destination": "/game/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

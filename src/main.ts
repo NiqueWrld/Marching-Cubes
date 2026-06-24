@@ -252,6 +252,13 @@ function animate(): void {
     velY -= GRAVITY * dt;
     camera.position.y += velY * dt;
 
+    // Safety: if the player falls below the world (e.g. a tile failed to load
+    // and there's no collider underneath), respawn at spawn altitude.
+    if (camera.position.y < -50) {
+        camera.position.set(0, 80, 0);
+        velY = 0;
+    }
+
     const px = camera.position.x, pz = camera.position.z;
     const feetY = camera.position.y - EYE_HEIGHT;
 

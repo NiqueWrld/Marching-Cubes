@@ -15,7 +15,16 @@ let admin = null;
 let db    = null;
 try {
     admin = require('firebase-admin');
-    const serviceAccount = require('../serviceAccountKey.json');
+    let serviceAccount = null;
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        serviceAccount = JSON.parse(
+            Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8')
+        );
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    } else {
+        serviceAccount = require('../serviceAccountKey.json');
+    }
     admin.initializeApp({
         credential:  admin.credential.cert(serviceAccount),
         databaseURL: process.env.FIREBASE_DATABASE_URL
@@ -24,7 +33,8 @@ try {
     console.log('[Firebase] Admin SDK initialised');
 } catch (err) {
     console.warn('[Firebase] Admin SDK not available – auth/DB disabled.');
-    console.warn('           Place serviceAccountKey.json in the project root to enable.');
+    console.warn('           Set FIREBASE_SERVICE_ACCOUNT_BASE64 (or FIREBASE_SERVICE_ACCOUNT)');
+    console.warn('           in .env, or place serviceAccountKey.json in the project root.');
 }
 
 // ─── Express + Socket.io ──────────────────────────────────────────────────────

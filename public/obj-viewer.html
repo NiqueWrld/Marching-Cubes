@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>OBJ Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1d22; color: #ddd; font: 13px system-ui, sans-serif; overflow: hidden; }
+  #ui { position: fixed; top: 8px; left: 8px; z-index: 10; background: rgba(0,0,0,.55); padding: 8px 10px; border-radius: 6px; display: flex; gap: 8px; align-items: center; }
+  #ui select, #ui input { background: #2a2f36; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 3px 5px; }
+  #ui label { opacity: .8; }
+  #info { position: fixed; bottom: 8px; left: 8px; background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 6px; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <label>File:</label>
+  <select id="fileSel"></select>
+  <label><input type="checkbox" id="wire"> wire</label>
+  <label><input type="checkbox" id="vcol" checked> vcolors</label>
+</div>
+<div id="info">loading…</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.184.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OBJLoader }     from 'three/addons/loaders/OBJLoader.js';
+
+const info = document.getElementById('info');
+const sel  = document.getElementById('fileSel');
+const wireBox = document.getElementById('wire');
+const vcolBox = document.getElementById('vcol');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1d22);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(60, 100, 40); scene.add(sun);
+scene.add(new THREE.GridHelper(200, 40, 0x444, 0x2a2f36));
+scene.add(new THREE.AxesHelper(10));
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 5000);
+camera.position.set(40, 40, 40);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+let current = null;
+
+// Patch OBJLoader to read per-vertex colors (v x y z r g b) which the baker emits.
+async function loadOBJ(url) {
+  const txt = await fetch(url).then(r => { if (!r.ok) throw new Error(r.status + ' ' + url); return r.text(); });
+  const loader = new OBJLoader();
+  const obj = loader.parse(txt);
+
+  // Extract vertex colors by re-scanning the file (OBJLoader ignores extra v columns).
+  const colors = [];
+  for (const line of txt.split('\n')) {
+    if (line.startsWith('v ')) {
+      const p = line.trim().split(/\s+/);
+      if (p.length >= 7) colors.push(+p[4], +p[5], +p[6]);
+    }
+  }
+
+  obj.traverse(c => {
+    if (c.isMesh) {
+      const g = c.geometry;
+      if (colors.length && g.attributes.position) {
+        // OBJLoader expands faces; colors need to match position count. If
+        // sizes differ, skip vcolors gracefully.
+        if (colors.length === g.attributes.position.count * 3) {
+          g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+        }
+      }
+      c.material = new THREE.MeshStandardMaterial({
+        vertexColors: !!g.attributes.color && vcolBox.checked,
+        color: g.attributes.color ? 0xffffff : 0x88aa88,
+        wireframe: wireBox.checked,
+        side: THREE.DoubleSide,
+        roughness: 0.9, metalness: 0.0,
+      });
+    }
+  });
+  return obj;
+}
+
+async function show(url) {
+  info.textContent = 'loading ' + url + '…';
+  try {
+    if (current) { scene.remove(current); current.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
+
+    let obj;
+    if (url === '*ALL*') {
+      obj = new THREE.Group();
+      const urls = [...sel.options].map(o => o.value).filter(v => v && v !== '*ALL*');
+      info.textContent = `loading ${urls.length} tiles…`;
+      let loaded = 0, failed = 0;
+      const CONCURRENCY = 6;
+      let idx = 0;
+      async function worker() {
+        while (idx < urls.length) {
+          const u = urls[idx++];
+          try {
+            const part = await loadOBJ(u);
+            obj.add(part);
+          } catch (e) {
+            failed++;
+            console.warn('[viewer] failed', u, e.message);
+          }
+          loaded++;
+          info.textContent = `loading ${loaded}/${urls.length} tiles (${failed} failed)…`;
+        }
+      }
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      console.log(`[viewer] loaded ${loaded - failed}/${urls.length} tiles`);
+    } else {
+      obj = await loadOBJ(url);
+    }
+    scene.add(obj);
+    current = obj;
+
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    controls.target.copy(center);
+    const r = Math.max(size.x, size.y, size.z) * 0.9 + 1;
+    camera.position.copy(center).add(new THREE.Vector3(r, r * 0.8, r));
+    camera.near = Math.max(0.1, r / 1000); camera.far = r * 50; camera.updateProjectionMatrix();
+    controls.update();
+
+    let tris = 0;
+    obj.traverse(c => { if (c.isMesh) tris += (c.geometry.index ? c.geometry.index.count : c.geometry.attributes.position.count) / 3; });
+    info.textContent = `${url}  •  ${tris.toLocaleString()} tris  •  size ${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)}`;
+  } catch (e) {
+    info.textContent = 'error: ' + e.message;
+  }
+}
+
+function rerunMaterial() {
+  if (!current) return;
+  current.traverse(c => {
+    if (c.isMesh) {
+      c.material.wireframe = wireBox.checked;
+      c.material.vertexColors = !!c.geometry.attributes.color && vcolBox.checked;
+      c.material.color.set(c.geometry.attributes.color && vcolBox.checked ? 0xffffff : 0x88aa88);
+      c.material.needsUpdate = true;
+    }
+  });
+}
+wireBox.onchange = rerunMaterial;
+vcolBox.onchange = rerunMaterial;
+
+// Populate dropdown from manifest.json if present, else fall back to a guess.
+async function init() {
+  let files = [];
+  let baseDir = 'world/';
+  const candidates = ['world/manifest.json', '/world/manifest.json', 'public/world/manifest.json', '/public/world/manifest.json'];
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const m = await res.json();
+      const fromManifest = (m.tiles || []).map(t => t.file || t.name || t).filter(Boolean);
+      const set = new Set();
+      for (const f of fromManifest) {
+        set.add(f.replace(/^\/?(public\/)?world\//, ''));
+      }
+      files = [...set];
+      baseDir = url.replace(/manifest\.json$/, '');
+      console.log(`[viewer] manifest @ ${url} → ${files.length} tiles`);
+      break;
+    } catch (e) {
+      console.warn('[viewer] manifest fetch failed', url, e.message);
+    }
+  }
+  if (!files.length) {
+    console.warn('[viewer] no manifest found, falling back to single tile');
+    files = ['tile_0_0.obj', 'tile_0_0_trees.obj'];
+  }
+
+  files.sort();
+  // Add a "whole world" entry first.
+  {
+    const o = document.createElement('option');
+    o.value = '*ALL*'; o.textContent = '★ whole world (all tiles)';
+    sel.appendChild(o);
+  }
+  for (const f of files) {
+    const o = document.createElement('option');
+    o.value = baseDir + f; o.textContent = f;
+    sel.appendChild(o);
+  }
+
+  const initial = new URLSearchParams(location.search).get('file');
+  if (initial) sel.value = initial.includes('/') ? initial : baseDir + initial;
+  sel.onchange = () => show(sel.value);
+  if (sel.value) show(sel.value);
+}
+
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+init();
+</script>
+</body>
+</html>

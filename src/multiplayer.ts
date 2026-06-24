@@ -70,8 +70,19 @@ export const whenConnected: Promise<void> = new Promise(res => { _resolveConnect
 export const spectatorTarget = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, ready: false };
 
 function connect(token: string): void {
+    // Multiplayer is opt-in: only connect when VITE_SERVER_URL is configured.
+    // Without it we run offline (no backend probe, no socket spam).
+    const serverUrl = (import.meta as { env?: { VITE_SERVER_URL?: string } }).env?.VITE_SERVER_URL;
+    if (!serverUrl) {
+        console.info('[Multiplayer] No VITE_SERVER_URL set — running offline.');
+        return;
+    }
+    doConnect(token, serverUrl);
+}
+
+function doConnect(token: string, url: string): void {
     if (socket) socket.disconnect();
-    socket = io({ auth: { token } });
+    socket = url ? io(url, { auth: { token } }) : io({ auth: { token } });
 
     // 'spectator' event now only used for initial camera position seed
     socket.on('spectator', ({ x, y, z, yaw, pitch }: { x?: number; y?: number; z?: number; yaw?: number; pitch?: number }) => {

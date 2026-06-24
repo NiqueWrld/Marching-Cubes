@@ -12,13 +12,28 @@ int seed     = GetIntArg("--seed", 12345);
 int chunkSz  = GetIntArg("--chunk", 16);
 int tileSize = GetIntArg("--tile", 4);   // chunk-columns per tile (NxN)
 double iso   = GetDoubleArg("--iso", 0.0);
+bool treesOnly   = HasFlag("--trees-only");
+bool terrainOnly = HasFlag("--terrain-only");
+if (treesOnly && terrainOnly)
+{
+    Console.Error.WriteLine("--trees-only and --terrain-only are mutually exclusive.");
+    return;
+}
+bool bakeTerrain = !treesOnly;
+bool bakeTrees   = !terrainOnly;
 
 string repoRoot = FindRepoRoot();
 string mcFile   = Path.Combine(repoRoot, "src", "marching-cubes.ts");
 string outDir   = GetStringArg("--out-dir", Path.Combine(repoRoot, "public", "world"));
 if (Directory.Exists(outDir))
 {
-    foreach (var f in Directory.EnumerateFiles(outDir, "*.obj")) File.Delete(f);
+    foreach (var f in Directory.EnumerateFiles(outDir, "tile_*.obj"))
+    {
+        bool isTreeFile = f.EndsWith("_trees.obj", StringComparison.OrdinalIgnoreCase);
+        if (treesOnly   && !isTreeFile) continue;
+        if (terrainOnly &&  isTreeFile) continue;
+        File.Delete(f);
+    }
 }
 Directory.CreateDirectory(outDir);
 
@@ -26,6 +41,7 @@ Console.WriteLine($"Repo:    {repoRoot}");
 Console.WriteLine($"OutDir:  {outDir}");
 Console.WriteLine($"Range:   x=[{centerX - radius}..{centerX + radius}] z=[{centerZ - radius}..{centerZ + radius}] y=[{yMin}..{yMax}]");
 Console.WriteLine($"Seed={seed} chunk={chunkSz} tile={tileSize} iso={iso}");
+Console.WriteLine($"Bake:    terrain={bakeTerrain} trees={bakeTrees}");
 
 var noise = new Noise(seed);
 
@@ -79,10 +95,18 @@ for (int cy = yMin; cy <= yMax; cy++)
 {
     doneChunks++;
     int ox = cx * chunkSz, oy = cy * chunkSz, oz = cz * chunkSz;
-    var r = SurfaceNets.March(DensityAt, ox, oy, oz, chunkSz, iso);
-    if (r.Verts.Count == 0) { Progress(); continue; }
 
-    int triCount = r.Verts.Count / 9;
+    SurfaceNets.Result? r = bakeTerrain
+        ? SurfaceNets.March(DensityAt, ox, oy, oz, chunkSz, iso)
+        : null;
+    bool hasTerrain = r != null && r.Verts.Count > 0;
+
+    // Trees only need a writer in chunks where the surface actually exists in
+    // this y-slice — we approximate with cy==0 (the surface y-band).
+    bool maybeTrees = bakeTrees && cy == 0;
+    if (!hasTerrain && !maybeTrees) { Progress(); continue; }
+
+    int triCount = hasTerrain ? r!.Verts.Count / 9 : 0;
     totalTris += triCount;
 
     int tx = FloorDiv(cx, tileSize);
@@ -90,44 +114,50 @@ for (int cy = yMin; cy <= yMax; cy++)
     var key = (tx, tz);
     if (!tileWriters.TryGetValue(key, out var t))
     {
-        t = new TileWriter(outDir, tx, tz);
+        t = new TileWriter(outDir, tx, tz, treesOnly);
         tileWriters[key] = t;
     }
     var w = t.W;
 
-    for (int i = 0; i < r.Verts.Count; i += 3)
+    if (hasTerrain)
     {
-        double vx = r.Verts[i], vy = r.Verts[i + 1], vz = r.Verts[i + 2];
-        if (vx < t.MinX) t.MinX = vx; if (vx > t.MaxX) t.MaxX = vx;
-        if (vy < t.MinY) t.MinY = vy; if (vy > t.MaxY) t.MaxY = vy;
-        if (vz < t.MinZ) t.MinZ = vz; if (vz > t.MaxZ) t.MaxZ = vz;
-        w.Write("v ");
-        w.Write(vx.ToString("F4", inv)); w.Write(' ');
-        w.Write(vy.ToString("F4", inv)); w.Write(' ');
-        w.Write(vz.ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Cols[i    ].ToString("F4", inv)); w.Write(' ');
-        w.Write(r.Cols[i + 1].ToString("F4", inv)); w.Write(' ');
-        w.WriteLine(r.Cols[i + 2].ToString("F4", inv));
+        for (int i = 0; i < r!.Verts.Count; i += 3)
+        {
+            double vx = r.Verts[i], vy = r.Verts[i + 1], vz = r.Verts[i + 2];
+            if (vx < t.MinX) t.MinX = vx; if (vx > t.MaxX) t.MaxX = vx;
+            if (vy < t.MinY) t.MinY = vy; if (vy > t.MaxY) t.MaxY = vy;
+            if (vz < t.MinZ) t.MinZ = vz; if (vz > t.MaxZ) t.MaxZ = vz;
+            w.Write("v ");
+            w.Write(vx.ToString("F4", inv)); w.Write(' ');
+            w.Write(vy.ToString("F4", inv)); w.Write(' ');
+            w.Write(vz.ToString("F4", inv)); w.Write(' ');
+            w.Write(r.Cols[i    ].ToString("F4", inv)); w.Write(' ');
+            w.Write(r.Cols[i + 1].ToString("F4", inv)); w.Write(' ');
+            w.WriteLine(r.Cols[i + 2].ToString("F4", inv));
+        }
+
+        for (int i = 0; i < r.Norms.Count; i += 3)
+        {
+            w.Write("vn ");
+            w.Write(r.Norms[i    ].ToString("F5", inv)); w.Write(' ');
+            w.Write(r.Norms[i + 1].ToString("F5", inv)); w.Write(' ');
+            w.WriteLine(r.Norms[i + 2].ToString("F5", inv));
+        }
+
+        int vCount = r.Verts.Count / 3;
+        for (int i = 0; i < vCount; i += 3)
+        {
+            int a = t.VBase + i, b = a + 1, c = a + 2;
+            w.Write("f "); w.Write(a); w.Write("//"); w.Write(a); w.Write(' ');
+            w.Write(b);    w.Write("//"); w.Write(b); w.Write(' ');
+            w.Write(c);    w.Write("//"); w.WriteLine(c);
+        }
+        t.VBase += vCount;
+        t.Tris  += triCount;
     }
 
-    for (int i = 0; i < r.Norms.Count; i += 3)
-    {
-        w.Write("vn ");
-        w.Write(r.Norms[i    ].ToString("F5", inv)); w.Write(' ');
-        w.Write(r.Norms[i + 1].ToString("F5", inv)); w.Write(' ');
-        w.WriteLine(r.Norms[i + 2].ToString("F5", inv));
-    }
-
-    int vCount = r.Verts.Count / 3;
-    for (int i = 0; i < vCount; i += 3)
-    {
-        int a = t.VBase + i, b = a + 1, c = a + 2;
-        w.Write("f "); w.Write(a); w.Write("//"); w.Write(a); w.Write(' ');
-        w.Write(b);    w.Write("//"); w.Write(b); w.Write(' ');
-        w.Write(c);    w.Write("//"); w.WriteLine(c);
-    }
-    t.VBase += vCount;
-    t.Tris  += triCount;
+    if (bakeTrees && cy == 0)
+        Trees.BakeChunk(t, inv, DensityAt, cx, cz, ox, oy, oz, chunkSz, iso);
 
     Progress();
 }
@@ -146,11 +176,30 @@ foreach (var (key, t) in tileWriters)
     totalBytes += len;
     t.W.Dispose();
     t.Fs.Dispose();
-    string name = $"tile_{key.tx}_{key.tz}.obj";
+    string name = $"tile_{key.tx}_{key.tz}{(treesOnly ? "_trees" : "")}.obj";
     if (!first) manifest.AppendLine(",");
     first = false;
     manifest.Append($"    {{ \"file\": \"{name}\", \"tx\": {key.tx}, \"tz\": {key.tz}, \"bytes\": {len}, \"tris\": {t.Tris}, ");
-    manifest.Append($"\"bbox\": [{t.MinX.ToString("F2", inv)}, {t.MinY.ToString("F2", inv)}, {t.MinZ.ToString("F2", inv)}, {t.MaxX.ToString("F2", inv)}, {t.MaxY.ToString("F2", inv)}, {t.MaxZ.ToString("F2", inv)}] }}");
+    bool hasBox = !double.IsInfinity(t.MinX);
+    if (hasBox)
+        manifest.Append($"\"bbox\": [{t.MinX.ToString("F2", inv)}, {t.MinY.ToString("F2", inv)}, {t.MinZ.ToString("F2", inv)}, {t.MaxX.ToString("F2", inv)}, {t.MaxY.ToString("F2", inv)}, {t.MaxZ.ToString("F2", inv)}], ");
+    else
+        manifest.Append("\"bbox\": null, ");
+    manifest.Append("\"trunks\": [");
+    for (int i = 0; i < t.Trunks.Count; i++)
+    {
+        var (tx2, tz2, tr, ybot, ytop) = t.Trunks[i];
+        if (i > 0) manifest.Append(", ");
+        manifest.Append($"[{tx2.ToString("F3", inv)},{tz2.ToString("F3", inv)},{tr.ToString("F3", inv)},{ybot.ToString("F3", inv)},{ytop.ToString("F3", inv)}]");
+    }
+    manifest.Append("], \"foliage\": [");
+    for (int i = 0; i < t.Foliage.Count; i++)
+    {
+        var (fx, fy, fz, fr) = t.Foliage[i];
+        if (i > 0) manifest.Append(", ");
+        manifest.Append($"[{fx.ToString("F3", inv)},{fy.ToString("F3", inv)},{fz.ToString("F3", inv)},{fr.ToString("F3", inv)}]");
+    }
+    manifest.Append("] }");
 }
 manifest.AppendLine();
 manifest.AppendLine("  ]");
@@ -171,6 +220,7 @@ void Progress()
 int GetIntArg(string n, int d)    { var v = GetRaw(n); return v is null ? d : int.Parse(v, CultureInfo.InvariantCulture); }
 double GetDoubleArg(string n, double d) { var v = GetRaw(n); return v is null ? d : double.Parse(v, CultureInfo.InvariantCulture); }
 string GetStringArg(string n, string d) => GetRaw(n) ?? d;
+bool HasFlag(string n) => Array.IndexOf(args, n) >= 0;
 string? GetRaw(string n) { int i = Array.IndexOf(args, n); return (i >= 0 && i + 1 < args.Length) ? args[i + 1] : null; }
 static string FindRepoRoot()
 {
@@ -189,15 +239,19 @@ class TileWriter
     public double MinX = double.PositiveInfinity, MaxX = double.NegativeInfinity;
     public double MinY = double.PositiveInfinity, MaxY = double.NegativeInfinity;
     public double MinZ = double.PositiveInfinity, MaxZ = double.NegativeInfinity;
-    public TileWriter(string outDir, int tx, int tz)
+    public List<(double x, double z, double r, double yBot, double yTop)> Trunks = new();
+    public List<(double x, double y, double z, double r)> Foliage = new();
+    public TileWriter(string outDir, int tx, int tz, bool treesOnly = false)
     {
-        string path = Path.Combine(outDir, $"tile_{tx}_{tz}.obj");
+        string suffix = treesOnly ? "_trees" : "";
+        string path = Path.Combine(outDir, $"tile_{tx}_{tz}{suffix}.obj");
         Fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read, 1 << 20);
         W  = new StreamWriter(Fs) { NewLine = "\n" };
-        W.WriteLine($"# Baked tile tx={tx} tz={tz}");
-        W.WriteLine($"o Tile_{tx}_{tz}");
+        W.WriteLine($"# Baked tile tx={tx} tz={tz}{(treesOnly ? " (trees only)" : "")}");
+        W.WriteLine($"o Tile_{tx}_{tz}{(treesOnly ? "_Trees" : "")}");
     }
 }
+
 
 class Noise
 {
