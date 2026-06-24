@@ -28,6 +28,14 @@ let _resolveRole!: (role: GameRole) => void;
 export const whenRoleKnown: Promise<GameRole> = new Promise(res => { _resolveRole = res; });
 export let currentRole: GameRole | null = null;
 
+/** Resolve as anonymous 'player' when the user isn't signed in (no Firestore claim). */
+export function resolveAnonymousRole(): GameRole {
+    if (currentRole) return currentRole;
+    currentRole = 'player';
+    _resolveRole('player');
+    return 'player';
+}
+
 /** How many seconds before a session is considered stale / abandoned */
 const STALE_SECONDS = 30;
 

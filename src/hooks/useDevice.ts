@@ -3,7 +3,7 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { firestore } from '../lib/firebase.js';
 import { getFingerprint } from '../lib/fingerprint.js';
 import { device } from '../lib/isMobile.js';
-import { claimRole } from '../lib/gameSession.js';
+import { claimRole, resolveAnonymousRole } from '../lib/gameSession.js';
 import { useAuth } from '../context/AuthContext.js';
 import type { Device } from '../types/Device.js';
 import type { GameRole } from '../lib/gameSession.js';
@@ -49,10 +49,14 @@ export function useDevice(): DeviceSession | null {
             }, { merge: true });
             await setDoc(docRef, { createdAt: serverTimestamp() }, { merge: true });
 
-            // Claim player / spectator role if user is signed in
+            // Claim player / spectator role if user is signed in,
+            // otherwise resolve immediately as an anonymous player so the
+            // game can start without auth.
             let role: GameRole | null = null;
             if (user?.uid) {
                 role = await claimRole(user.uid, fingerprint);
+            } else {
+                role = resolveAnonymousRole();
             }
 
             if (!cancelled) {

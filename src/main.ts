@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { Auth } from './auth.js';
 import { Multiplayer, initMultiplayer, spectatorTarget } from './multiplayer.js';
-import { whenRoleKnown, currentRole } from './lib/gameSession.js';
+import { whenRoleKnown, currentRole, resolveAnonymousRole } from './lib/gameSession.js';
 import { mobileInput } from './pages/Game/Controls/Mobile/index.js';
 import { device } from './lib/isMobile.js';
 import { CHUNK, ISO } from './lib/worldConstants.js';
 import { densityAt } from './lib/terrain.js';
 import { createWater } from './lib/water.js';
 import { ChunkDB } from './lib/chunkDB.js';
-import { loadInitialChunks, updateChunks } from './lib/chunks.js';
+import { loadInitialChunks, updateChunks, worldColliders } from './lib/chunks.js';
 import { treeColliders } from './lib/trees.js';
 
 export function startGame(container: HTMLElement): () => void {
@@ -62,6 +62,7 @@ let onGround = false;
 let yaw = 0, pitch = 0, locked = false;
 
 const lockedMsg = document.getElementById('locked-msg') as HTMLElement;
+const lockedText = (document.getElementById('locked-text') as HTMLElement | null) ?? lockedMsg;
 const info      = document.getElementById('info')       as HTMLElement;
 
 document.addEventListener('pointerlockchange', () => {
@@ -97,35 +98,95 @@ let running          = true;
 
 lockedMsg.classList.remove('hidden');
 lockedMsg.style.display = 'block';
-lockedMsg.textContent   = 'Connecting to server…';
+lockedText.textContent  = 'Connecting to server…';
 
 ChunkDB.open().then(async () => {
-    await whenRoleKnown;
-    if (currentRole === 'spectator') {
-        lockedMsg.textContent      = '👁 Spectator Mode\nAlready connected on another device.';
-        lockedMsg.style.whiteSpace = 'pre-line';
-        return;
+    try {
+        // Race the role claim against a short timeout so the game still
+        // starts if no React-side useDevice() ever calls claimRole().
+        const roleTimeout = new Promise<void>(resolve => setTimeout(() => {
+            resolveAnonymousRole();
+            resolve();
+        }, 3000));
+        await Promise.race([whenRoleKnown, roleTimeout]);
+        if (currentRole === 'spectator') {
+            lockedText.textContent     = '👁 Spectator Mode\nAlready connected on another device.';
+            lockedMsg.style.whiteSpace = 'pre-line';
+            return;
+        }
+        lockedText.textContent = 'Loading world…';
+        await Auth.ready;
+        try {
+            const saved = Auth.getToken() ? await Auth.loadServerPosition() : null;
+            if (saved) {
+                camera.position.set(saved.x, saved.y, saved.z);
+                yaw   = saved.yaw;
+                pitch = saved.pitch;
+            }
+        } catch (err) {
+            console.error('[Game] Failed to load saved player position:', err);
+        }
+        await loadInitialChunks(scene, camera, () => { lockedMsg.style.display = 'none'; });
+
+        // Raycast straight down against the actual baked mesh to find the
+        // true surface (the TS density function disagrees with the C# baker,
+        // so density-based checks can leave the player buried).
+        {
+            const ray = new THREE.Raycaster(
+                new THREE.Vector3(camera.position.x, 500, camera.position.z),
+                new THREE.Vector3(0, -1, 0),
+                0, 1000,
+            );
+            const hits = ray.intersectObjects(worldColliders, false);
+            const hit = hits.find(h => (h.object as THREE.Mesh).isMesh);
+            if (hit) {
+                camera.position.y = hit.point.y + EYE_HEIGHT + 0.1;
+                velY = 0;
+                console.log(`[Game] Spawn snapped to baked surface y=${camera.position.y.toFixed(2)} (hit=${hit.point.y.toFixed(2)})`);
+            } else {
+                console.warn('[Game] No surface hit below spawn — falling back to density scan');
+                if (densityAt(camera.position.x, camera.position.y - EYE_HEIGHT, camera.position.z) > ISO) {
+                    let y = camera.position.y;
+                    while (y < 200 && densityAt(camera.position.x, y, camera.position.z) > ISO) y += 1;
+                    camera.position.y = y + EYE_HEIGHT + 0.1;
+                    velY = 0;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[Game] World initialisation step failed:', err);
+        lockedText.textContent = `Failed to load world: ${(err as Error)?.message ?? err}`;
+        throw err;
     }
-    lockedMsg.textContent = 'Loading world…';
-    await Auth.ready;
-    const saved = Auth.getToken() ? await Auth.loadServerPosition() : null;
-    if (saved) {
-        camera.position.set(saved.x, saved.y, saved.z);
-        yaw   = saved.yaw;
-        pitch = saved.pitch;
-    }
-    await loadInitialChunks(scene, camera, () => { lockedMsg.style.display = 'none'; });
 }).catch(err => {
     console.error('[Game] World initialisation failed:', err);
-    lockedMsg.textContent = 'Failed to load world. See console for details.';
+    lockedText.textContent = `Failed to load world: ${(err as Error)?.message ?? err}`;
+});
+
+// Surface otherwise-silent runtime errors
+window.addEventListener('error', (e) => {
+    console.error('[Game] Uncaught error:', e.error ?? e.message);
+});
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('[Game] Unhandled promise rejection:', e.reason);
 });
 
 // ─── Render loop ──────────────────────────────────────────────────────────────
+let _lastCoordLog = 0;
+const _down = new THREE.Vector3(0, -1, 0);
+const _groundRay = new THREE.Raycaster(new THREE.Vector3(), _down, 0, 100);
 function animate(): void {
     if (!running) return;
     requestAnimationFrame(animate);
     clock.update();
     const dt = Math.min(clock.getDelta(), 0.05);
+
+    const now = performance.now();
+    if (now - _lastCoordLog > 500) {
+        _lastCoordLog = now;
+        const p = camera.position;
+        console.log(`[Player] x=${p.x.toFixed(2)} y=${p.y.toFixed(2)} z=${p.z.toFixed(2)} yaw=${yaw.toFixed(2)} pitch=${pitch.toFixed(2)}`);
+    }
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
@@ -172,25 +233,42 @@ function animate(): void {
         if (mobileInput.jump && onGround) { velY = JUMP_VEL; onGround = false; mobileInput.jump = false; }
     }
 
+    // Skip physics until the baked world is in the scene — otherwise the
+    // player falls through empty space before colliders exist.
+    if (worldColliders.length === 0) {
+        camera.position.set(0, 35, 0);
+        velY = 0;
+        waterMesh.position.x = camera.position.x;
+        waterMesh.position.z = camera.position.z;
+        waterUniforms.uTime.value += dt;
+        renderer.render(scene, camera);
+        return;
+    }
+
     velY -= GRAVITY * dt;
     camera.position.y += velY * dt;
 
     const px = camera.position.x, pz = camera.position.z;
     const feetY = camera.position.y - EYE_HEIGHT;
 
-    // Terrain collision (step-up via binary search)
-    if (densityAt(px, feetY, pz) > ISO) {
-        let lo = feetY, hi = feetY + 2;
-        while (hi < feetY + 30 && densityAt(px, hi, pz) > ISO) hi += 1;
-        for (let i = 0; i < 10; i++) {
-            const mid = (lo + hi) * 0.5;
-            if (densityAt(px, mid, pz) > ISO) lo = mid; else hi = mid;
+    // Terrain collision via downward raycast against the baked mesh.
+    // Start ray from well above the world's top so we always hit the top
+    // surface, never the underside (the world's max y is ~48).
+    _groundRay.set(new THREE.Vector3(px, 500, pz), _down);
+    _groundRay.far = 1000;
+    const groundHits = _groundRay.intersectObjects(worldColliders, false);
+    const groundHit = groundHits[0];
+    if (groundHit) {
+        const surfY = groundHit.point.y;
+        if (feetY < surfY) {
+            camera.position.y = surfY + EYE_HEIGHT;
+            if (velY < 0) velY = 0;
+            onGround = true;
+        } else {
+            onGround = (feetY - surfY) < 0.25;
         }
-        camera.position.y = hi + EYE_HEIGHT;
-        if (velY < 0) velY = 0;
-        onGround = true;
     } else {
-        onGround = densityAt(px, feetY - 0.25, pz) > ISO;
+        onGround = false;
     }
 
     // Tree collision

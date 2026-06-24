@@ -46,7 +46,15 @@
 </div>
 <div id="crosshair" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none"></div>
 <div id="info" class="fixed bottom-4 left-1/2 -translate-x-1/2 text-white/50 text-xs pointer-events-none">Click to capture mouse</div>
-<div id="locked-msg" style="display:none" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white text-xl text-center bg-black/70 px-10 py-6 rounded-lg border border-white/20">Loading world...</div>
+<div id="locked-msg" style="display:none" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white text-xl text-center bg-black/70 px-10 py-6 rounded-lg border border-white/20">
+    <div id="locked-text">Loading world...</div>
+    <div id="world-progress" style="display:none" class="mt-4 w-72 mx-auto">
+        <div class="h-2 bg-white/10 rounded overflow-hidden">
+            <div id="world-progress-bar" class="h-full bg-cyan-400 transition-all" style="width:0%"></div>
+        </div>
+        <div id="world-progress-label" class="mt-2 text-xs text-cyan-200/80">0%</div>
+    </div>
+</div>
 
 <script type="module" src="/src/main.ts"></script>
 </body>

@@ -146,6 +146,13 @@ io.on('connection', (socket) => {
 
     console.log(`[+] ${name} (${uid}) connected [${socket.id}]`);
 
+    socket.on('error', (err) => {
+        console.error(`[Socket error] ${name} (${uid}) [${socket.id}]`, err);
+    });
+    socket.on('disconnect', (reason) => {
+        console.log(`[~] ${name} (${uid}) [${socket.id}] disconnect reason: ${reason}`);
+    });
+
     if (!uidSockets.has(uid)) uidSockets.set(uid, new Set());
     uidSockets.get(uid).add(socket.id);
 
@@ -211,12 +218,33 @@ if (process.env.NODE_ENV !== 'development') {
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {
-    console.error('[Express error]', err);
+    console.error(`[Express error] ${req.method} ${req.originalUrl}`, err);
     if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
 });
 
-process.on('unhandledRejection', (reason) => {
+// Log every non-2xx response so we can spot silent 4xx/5xx from the client
+app.use((req, res, next) => {
+    res.on('finish', () => {
+        if (res.statusCode >= 400) {
+            console.warn(`[HTTP ${res.statusCode}] ${req.method} ${req.originalUrl}`);
+        }
+    });
+    next();
+});
+
+process.on('unhandledRejection', (reason, promise) => {
     console.error('[Unhandled rejection]', reason);
+    if (reason && reason.stack) console.error(reason.stack);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[Uncaught exception]', err);
+});
+process.on('warning', (w) => {
+    console.warn('[Node warning]', w.name, w.message);
+});
+
+io.engine.on('connection_error', (err) => {
+    console.error('[Socket.io connection error]', err.code, err.message, err.context);
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────

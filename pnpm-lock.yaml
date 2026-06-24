@@ -50,6 +50,9 @@ importers:
       three:
         specifier: ^0.184.0
         version: 0.184.0
+      three-mesh-bvh:
+        specifier: ^0.9.10
+        version: 0.9.10(three@0.184.0)
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.0
@@ -1647,6 +1650,11 @@ packages:
   teeny-request@9.0.0:
     resolution: {integrity: sha512-resvxdc6Mgb7YEThw6G6bExlXKkv6+YbuzGg9xuXxSgxJF7Ozs+o8Y9+2R3sArdWdW8nOokoQb1yrpFB0pQK2g==}
     engines: {node: '>=14'}
+
+  three-mesh-bvh@0.9.10:
+    resolution: {integrity: sha512-UOlTgPIeqUURcwaG8knxvBaruwZlC4X3/WSHEFO7rYvMVv/YNUrkfFEszvfj36pXV88dCHoHNnIp0PifkirnTQ==}
+    peerDependencies:
+      three: '>= 0.159.0'
 
   three@0.184.0:
     resolution: {integrity: sha512-wtTRjG92pM5eUg/KuUnHsqSAlPM296brTOcLgMRqEeylYTh/CdtvKUvCyyCQTzFuStieWxvZb8mVTMvdPyUpxg==}
@@ -3685,6 +3693,10 @@ snapshots:
       - encoding
       - supports-color
     optional: true
+
+  three-mesh-bvh@0.9.10(three@0.184.0):
+    dependencies:
+      three: 0.184.0
 
   three@0.184.0: {}
 

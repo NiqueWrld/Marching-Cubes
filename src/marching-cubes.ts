@@ -219,12 +219,36 @@ export function marchChunk(
                 const pt = [p0, p1, p2][k];
                 verts.push(ox + pt[0], oy + pt[1], oz + pt[2]);
                 norms.push(nx/len, ny/len, nz/len);
-                const worldY = oy + pt[1];
-                if      (worldY <  4) cols.push(0.24, 0.45, 0.90);
-                else if (worldY <  8) cols.push(0.76, 0.70, 0.50);
-                else if (worldY < 20) cols.push(0.25, 0.55, 0.25);
-                else if (worldY < 28) cols.push(0.40, 0.35, 0.30);
-                else                  cols.push(0.95, 0.95, 1.00);
+                const worldY  = oy + pt[1];
+                const slope   = Math.abs(ny / len);  // 1 = flat, 0 = vertical
+                const WATER   = 8;
+
+                let r: number, g: number, b: number;
+                if (worldY < WATER - 1) {
+                    // Underwater rock — dark blue-grey
+                    r = 0.18; g = 0.28; b = 0.42;
+                } else if (worldY < WATER + 2.5) {
+                    // Sand / beach
+                    r = 0.76; g = 0.70; b = 0.50;
+                } else if (worldY > 52 && slope > 0.55) {
+                    // Snow cap (flat high peaks)
+                    r = 0.92; g = 0.94; b = 0.98;
+                } else if (worldY > 40 || slope < 0.45) {
+                    // Rock / steep cliff
+                    const shade = 0.38 + slope * 0.18;
+                    r = shade + 0.04; g = shade; b = shade - 0.04;
+                } else if (slope > 0.72) {
+                    // Flat grass
+                    r = 0.22 + slope * 0.06; g = 0.50 + slope * 0.10; b = 0.18;
+                } else {
+                    // Mixed grass-rock on moderate slopes
+                    const t = (slope - 0.45) / 0.27;
+                    const shade = 0.42;
+                    r = shade * (1-t) + (0.24) * t;
+                    g = shade * (1-t) + (0.52) * t;
+                    b = (shade - 0.04) * (1-t) + (0.18) * t;
+                }
+                cols.push(r, g, b);
             }
         }
     }

@@ -3,3 +3,9 @@ serviceAccountKey.json
 chunks/
 .env
 dist/
+public/world.obj
+*.obj
+
+scripts/BakeWorld/bin/
+scripts/BakeWorld/obj/
+
