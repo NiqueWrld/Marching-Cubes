@@ -15,7 +15,7 @@ const WORLD_DIR_URL = '/world/';
 const MANIFEST_URL  = WORLD_DIR_URL + 'manifest.json';
 const IDB_NAME  = 'world-cache';
 const IDB_STORE = 'files';
-const CACHE_VERSION = 'v2-tiles';
+const CACHE_VERSION = 'v3-winding';
 
 interface CachedTile {
     text: string;

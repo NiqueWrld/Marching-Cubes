@@ -126,12 +126,10 @@ ChunkDB.open().then(async () => {
         } catch (err) {
             console.error('[Game] Failed to load saved player position:', err);
         }
-        await loadInitialChunks(scene, camera, () => { lockedMsg.style.display = 'none'; });
-
-        // Raycast straight down against the actual baked mesh to find the
-        // true surface (the TS density function disagrees with the C# baker,
-        // so density-based checks can leave the player buried).
-        {
+        // onReady fires the moment the first tile is in the scene, so we
+        // do the spawn snap + reveal there instead of waiting for all 49.
+        const spawnReady = () => {
+            lockedMsg.style.display = 'none';
             const ray = new THREE.Raycaster(
                 new THREE.Vector3(camera.position.x, 500, camera.position.z),
                 new THREE.Vector3(0, -1, 0),
@@ -144,7 +142,7 @@ ChunkDB.open().then(async () => {
                 velY = 0;
                 console.log(`[Game] Spawn snapped to baked surface y=${camera.position.y.toFixed(2)} (hit=${hit.point.y.toFixed(2)})`);
             } else {
-                console.warn('[Game] No surface hit below spawn — falling back to density scan');
+                console.warn('[Game] First tile had no surface under spawn — using density fallback');
                 if (densityAt(camera.position.x, camera.position.y - EYE_HEIGHT, camera.position.z) > ISO) {
                     let y = camera.position.y;
                     while (y < 200 && densityAt(camera.position.x, y, camera.position.z) > ISO) y += 1;
@@ -152,9 +150,12 @@ ChunkDB.open().then(async () => {
                     velY = 0;
                 }
             }
-        }
-        // Kick off the radial reveal from the player's feet.
-        startReveal(camera.position);
+            startReveal(camera.position);
+        };
+        // Don't await — let remaining tiles stream in while the player plays.
+        loadInitialChunks(scene, camera, spawnReady).catch(err => {
+            console.error('[Game] Background tile load failed:', err);
+        });
     } catch (err) {
         console.error('[Game] World initialisation step failed:', err);
         lockedText.textContent = `Failed to load world: ${(err as Error)?.message ?? err}`;

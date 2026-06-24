@@ -27,9 +27,6 @@ Console.WriteLine($"OutDir:  {outDir}");
 Console.WriteLine($"Range:   x=[{centerX - radius}..{centerX + radius}] z=[{centerZ - radius}..{centerZ + radius}] y=[{yMin}..{yMax}]");
 Console.WriteLine($"Seed={seed} chunk={chunkSz} tile={tileSize} iso={iso}");
 
-var (edgeTable, triTable) = TableLoader.Load(mcFile);
-Console.WriteLine($"Loaded edgeTable[{edgeTable.Length}] triTable[{triTable.Length}]");
-
 var noise = new Noise(seed);
 
 double DensityAt(double wx, double wy, double wz)
@@ -66,7 +63,7 @@ for (int cy = yMin; cy <= yMax; cy++)
 {
     doneChunks++;
     int ox = cx * chunkSz, oy = cy * chunkSz, oz = cz * chunkSz;
-    var r = MarchingCubes.March(DensityAt, ox, oy, oz, chunkSz, iso, edgeTable, triTable);
+    var r = SurfaceNets.March(DensityAt, ox, oy, oz, chunkSz, iso);
     if (r.Verts.Count == 0) { Progress(); continue; }
 
     int triCount = r.Verts.Count / 9;
@@ -236,8 +233,227 @@ class Noise
     }
 }
 
-// ─── Marching cubes (port of src/marching-cubes.ts) ──────────────────────────
-static class MarchingCubes
+// ─── Surface Nets (watertight; replaces marching cubes) ─────────────────────
+static class SurfaceNets
+{
+    public record Result(List<float> Verts, List<float> Norms, List<float> Cols);
+
+    public static Result March(Func<double, double, double, double> densityFn,
+                               int ox, int oy, int oz, int size, double iso)
+    {
+        // Sample density on (size+1)^3 grid. "Inside" = density > iso.
+        int N = size + 1;
+        var density = new double[N * N * N];
+        int Idx(int x, int y, int z) => (x * N + y) * N + z;
+        for (int x = 0; x < N; x++)
+        for (int y = 0; y < N; y++)
+        for (int z = 0; z < N; z++)
+            density[Idx(x, y, z)] = densityFn(ox + x, oy + y, oz + z);
+
+        // One vertex per straddling cell. vIdx[size,size,size] holds -1 or index.
+        int CellIdx(int x, int y, int z) => (x * size + y) * size + z;
+        var vIdx  = new int[size * size * size];
+        var vPosX = new float[size * size * size];
+        var vPosY = new float[size * size * size];
+        var vPosZ = new float[size * size * size];
+        for (int i = 0; i < vIdx.Length; i++) vIdx[i] = -1;
+
+        var verts = new List<float>();
+        var norms = new List<float>();
+        var cols  = new List<float>();
+
+        for (int x = 0; x < size; x++)
+        for (int y = 0; y < size; y++)
+        for (int z = 0; z < size; z++)
+        {
+            double d000 = density[Idx(x,   y,   z  )], d100 = density[Idx(x+1, y,   z  )],
+                   d010 = density[Idx(x,   y+1, z  )], d110 = density[Idx(x+1, y+1, z  )],
+                   d001 = density[Idx(x,   y,   z+1)], d101 = density[Idx(x+1, y,   z+1)],
+                   d011 = density[Idx(x,   y+1, z+1)], d111 = density[Idx(x+1, y+1, z+1)];
+
+            int solid = 0;
+            if (d000 > iso) solid++;
+            if (d100 > iso) solid++;
+            if (d010 > iso) solid++;
+            if (d110 > iso) solid++;
+            if (d001 > iso) solid++;
+            if (d101 > iso) solid++;
+            if (d011 > iso) solid++;
+            if (d111 > iso) solid++;
+            if (solid == 0 || solid == 8) continue;
+
+            // Average edge-crossing points → cell vertex.
+            double sx = 0, sy = 0, sz = 0;
+            int crossings = 0;
+            // 4 X-axis edges
+            if ((d000 > iso) != (d100 > iso)) { double t = (iso - d000) / (d100 - d000); sx += t; sy += 0; sz += 0; crossings++; }
+            if ((d010 > iso) != (d110 > iso)) { double t = (iso - d010) / (d110 - d010); sx += t; sy += 1; sz += 0; crossings++; }
+            if ((d001 > iso) != (d101 > iso)) { double t = (iso - d001) / (d101 - d001); sx += t; sy += 0; sz += 1; crossings++; }
+            if ((d011 > iso) != (d111 > iso)) { double t = (iso - d011) / (d111 - d011); sx += t; sy += 1; sz += 1; crossings++; }
+            // 4 Y-axis edges
+            if ((d000 > iso) != (d010 > iso)) { double t = (iso - d000) / (d010 - d000); sx += 0; sy += t; sz += 0; crossings++; }
+            if ((d100 > iso) != (d110 > iso)) { double t = (iso - d100) / (d110 - d100); sx += 1; sy += t; sz += 0; crossings++; }
+            if ((d001 > iso) != (d011 > iso)) { double t = (iso - d001) / (d011 - d001); sx += 0; sy += t; sz += 1; crossings++; }
+            if ((d101 > iso) != (d111 > iso)) { double t = (iso - d101) / (d111 - d101); sx += 1; sy += t; sz += 1; crossings++; }
+            // 4 Z-axis edges
+            if ((d000 > iso) != (d001 > iso)) { double t = (iso - d000) / (d001 - d000); sx += 0; sy += 0; sz += t; crossings++; }
+            if ((d100 > iso) != (d101 > iso)) { double t = (iso - d100) / (d101 - d100); sx += 1; sy += 0; sz += t; crossings++; }
+            if ((d010 > iso) != (d011 > iso)) { double t = (iso - d010) / (d011 - d010); sx += 0; sy += 1; sz += t; crossings++; }
+            if ((d110 > iso) != (d111 > iso)) { double t = (iso - d110) / (d111 - d110); sx += 1; sy += 1; sz += t; crossings++; }
+
+            double cx = crossings > 0 ? sx / crossings : 0.5;
+            double cy = crossings > 0 ? sy / crossings : 0.5;
+            double cz = crossings > 0 ? sz / crossings : 0.5;
+            int ci = CellIdx(x, y, z);
+            vPosX[ci] = (float)(x + cx);
+            vPosY[ci] = (float)(y + cy);
+            vPosZ[ci] = (float)(z + cz);
+            vIdx[ci]  = 0; // mark active; final index assigned after smoothing
+        }
+
+        // Laplacian smoothing — average each active cell with its 6 active neighbours.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            var tX = new float[vPosX.Length];
+            var tY = new float[vPosY.Length];
+            var tZ = new float[vPosZ.Length];
+            for (int x = 1; x < size - 1; x++)
+            for (int y = 1; y < size - 1; y++)
+            for (int z = 1; z < size - 1; z++)
+            {
+                int ci = CellIdx(x, y, z);
+                if (vIdx[ci] < 0) { tX[ci] = vPosX[ci]; tY[ci] = vPosY[ci]; tZ[ci] = vPosZ[ci]; continue; }
+                double nx = 0, ny = 0, nz = 0; int n = 0;
+                void Add(int dx, int dy, int dz)
+                {
+                    int ni = CellIdx(x + dx, y + dy, z + dz);
+                    if (vIdx[ni] >= 0) { nx += vPosX[ni]; ny += vPosY[ni]; nz += vPosZ[ni]; n++; }
+                }
+                Add(-1,0,0); Add(1,0,0); Add(0,-1,0); Add(0,1,0); Add(0,0,-1); Add(0,0,1);
+                if (n > 0)
+                {
+                    tX[ci] = (float)((vPosX[ci] + nx / n) * 0.5);
+                    tY[ci] = (float)((vPosY[ci] + ny / n) * 0.5);
+                    tZ[ci] = (float)((vPosZ[ci] + nz / n) * 0.5);
+                }
+                else { tX[ci] = vPosX[ci]; tY[ci] = vPosY[ci]; tZ[ci] = vPosZ[ci]; }
+            }
+            Array.Copy(tX, vPosX, tX.Length);
+            Array.Copy(tY, vPosY, tY.Length);
+            Array.Copy(tZ, vPosZ, tZ.Length);
+        }
+
+        // Quads per straddling edge (only when all 4 surrounding cells have vertices).
+        // To stay non-indexed (matches MC pipeline), we expand quads to 2 triangles.
+        void Tri(float ax, float ay, float az, float bx, float by, float bz, float cxv, float cyv, float czv)
+        {
+            // Geometric normal
+            double e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+            double e2x = cxv - ax, e2y = cyv - ay, e2z = czv - az;
+            double nxn = e1y * e2z - e1z * e2y;
+            double nyn = e1z * e2x - e1x * e2z;
+            double nzn = e1x * e2y - e1y * e2x;
+            double len = Math.Sqrt(nxn * nxn + nyn * nyn + nzn * nzn) + 1e-9;
+            float fnx = (float)(nxn / len), fny = (float)(nyn / len), fnz = (float)(nzn / len);
+
+            void Push(float vx, float vy, float vz)
+            {
+                double wx = ox + vx, wy = oy + vy, wz = oz + vz;
+                verts.Add((float)wx); verts.Add((float)wy); verts.Add((float)wz);
+                norms.Add(fnx); norms.Add(fny); norms.Add(fnz);
+                double slope = Math.Abs(fny);
+                const double WATER = 8;
+                double rC, gC, bC;
+                if (wy < WATER - 1)               { rC = 0.18; gC = 0.28; bC = 0.42; }
+                else if (wy < WATER + 2.5)        { rC = 0.76; gC = 0.70; bC = 0.50; }
+                else if (wy > 52 && slope > 0.55) { rC = 0.92; gC = 0.94; bC = 0.98; }
+                else if (wy > 40 || slope < 0.45)
+                {
+                    double shade = 0.38 + slope * 0.18;
+                    rC = shade + 0.04; gC = shade; bC = shade - 0.04;
+                }
+                else if (slope > 0.72)
+                {
+                    rC = 0.22 + slope * 0.06; gC = 0.50 + slope * 0.10; bC = 0.18;
+                }
+                else
+                {
+                    double tt = (slope - 0.45) / 0.27;
+                    double shade = 0.42;
+                    rC = shade * (1 - tt) + 0.24 * tt;
+                    gC = shade * (1 - tt) + 0.52 * tt;
+                    bC = (shade - 0.04) * (1 - tt) + 0.18 * tt;
+                }
+                cols.Add((float)rC); cols.Add((float)gC); cols.Add((float)bC);
+            }
+            Push(ax, ay, az); Push(bx, by, bz); Push(cxv, cyv, czv);
+        }
+        void Quad(int a, int b, int c, int d, bool flip)
+        {
+            float ax = vPosX[a], ay = vPosY[a], az = vPosZ[a];
+            float bx = vPosX[b], by = vPosY[b], bz = vPosZ[b];
+            float cxv = vPosX[c], cyv = vPosY[c], czv = vPosZ[c];
+            float dx = vPosX[d], dy = vPosY[d], dz = vPosZ[d];
+            if (flip)
+            {
+                Tri(ax, ay, az, cxv, cyv, czv, bx, by, bz);
+                Tri(ax, ay, az, dx, dy, dz, cxv, cyv, czv);
+            }
+            else
+            {
+                Tri(ax, ay, az, bx, by, bz, cxv, cyv, czv);
+                Tri(ax, ay, az, cxv, cyv, czv, dx, dy, dz);
+            }
+        }
+
+        for (int x = 1; x < size; x++)
+        for (int y = 1; y < size; y++)
+        for (int z = 1; z < size; z++)
+        {
+            // Edge along +X between (x,y,z) and (x+1,y,z) at the cell corner (x+1,y,z)
+            // shared by cells (x,y-1,z-1) (x,y,z-1) (x,y-1,z) (x,y,z).
+            // Surface-net quads sit on edges between solid/empty pairs.
+            // We test the corner densities at (x, y, z) vs neighbours.
+            // Using approach from reference baker: 3 edges per cell (+X, +Y, +Z).
+            double dC = density[Idx(x, y, z)];
+
+            // +X edge
+            if ((dC > iso) != (density[Idx(x - 1, y, z)] > iso))
+            {
+                int v1 = CellIdx(x - 1, y, z);
+                int v2 = CellIdx(x - 1, y - 1, z);
+                int v3 = CellIdx(x - 1, y - 1, z - 1);
+                int v4 = CellIdx(x - 1, y, z - 1);
+                if (vIdx[v1] >= 0 && vIdx[v2] >= 0 && vIdx[v3] >= 0 && vIdx[v4] >= 0)
+                    Quad(v1, v2, v3, v4, dC > iso);
+            }
+            // +Y edge
+            if ((dC > iso) != (density[Idx(x, y - 1, z)] > iso))
+            {
+                int v1 = CellIdx(x, y - 1, z);
+                int v2 = CellIdx(x, y - 1, z - 1);
+                int v3 = CellIdx(x - 1, y - 1, z - 1);
+                int v4 = CellIdx(x - 1, y - 1, z);
+                if (vIdx[v1] >= 0 && vIdx[v2] >= 0 && vIdx[v3] >= 0 && vIdx[v4] >= 0)
+                    Quad(v1, v2, v3, v4, dC > iso);
+            }
+            // +Z edge
+            if ((dC > iso) != (density[Idx(x, y, z - 1)] > iso))
+            {
+                int v1 = CellIdx(x, y, z - 1);
+                int v2 = CellIdx(x - 1, y, z - 1);
+                int v3 = CellIdx(x - 1, y - 1, z - 1);
+                int v4 = CellIdx(x, y - 1, z - 1);
+                if (vIdx[v1] >= 0 && vIdx[v2] >= 0 && vIdx[v3] >= 0 && vIdx[v4] >= 0)
+                    Quad(v1, v2, v3, v4, dC > iso);
+            }
+        }
+        return new Result(verts, norms, cols);
+    }
+}
+
+// ─── Parse edgeTable and triTable straight out of marching-cubes.ts ─────────
+static class TableLoader
 {
     public record Result(List<float> Verts, List<float> Norms, List<float> Cols);
 
@@ -301,13 +517,18 @@ static class MarchingCubes
             if ((e & 2048) != 0) { edgePts[11] = EdgeVert(x,   y,   z+1, x,   y+1, z+1); hasEdge[11] = true; }
 
             int[] tris = triTable[cubeIdx];
+            bool flipWinding = false;
             if (tris.Length == 0 || tris[0] == -1)
+            {
                 tris = triTable[255 - cubeIdx];
+                flipWinding = true; // complementary case → reverse winding
+            }
             if (tris.Length == 0 || tris[0] == -1) continue;
 
             for (int t = 0; t + 2 < tris.Length && tris[t] != -1; t += 3)
             {
                 int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+                if (flipWinding) (i1, i2) = (i2, i1);
                 if (!hasEdge[i0] || !hasEdge[i1] || !hasEdge[i2]) continue;
                 var p0 = edgePts[i0]; var p1 = edgePts[i1]; var p2 = edgePts[i2];
 
