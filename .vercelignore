@@ -1,0 +1,6 @@
+android/
+scripts/BakeWorld/bin/
+scripts/BakeWorld/obj/
+chunks/
+serviceAccountKey.json
+.env

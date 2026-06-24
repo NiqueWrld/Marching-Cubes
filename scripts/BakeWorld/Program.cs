@@ -41,7 +41,23 @@ double DensityAt(double wx, double wy, double wz)
     double r1 = 1.0 - Math.Abs(noise.Perlin(sx * 0.022, 0,   sz * 0.022));
     double r2 = 1.0 - Math.Abs(noise.Perlin(sx * 0.048, 0.5, sz * 0.048));
     double ridged = r1 * r1 * 48 + r2 * r2 * 14;
-    return (baseH + biome2 * ridged - wy) / 8.0;
+    double surfH = baseH + biome2 * ridged;
+
+    // Fade terrain height down to below sea level near the world perimeter so
+    // the bake region is always bordered by water instead of cliffs.
+    const double SEA = 8.0;
+    const double EDGE_FLOOR = SEA - 4.0;
+    double half = radius * chunkSz;
+    double dx = Math.Abs(wx - centerX * chunkSz);
+    double dz = Math.Abs(wz - centerZ * chunkSz);
+    double d  = Math.Max(dx, dz);
+    double fadeStart = half * 0.70;
+    double fadeEnd   = half * 0.98;
+    double t = Math.Clamp((d - fadeStart) / (fadeEnd - fadeStart), 0.0, 1.0);
+    t = t * t * (3 - 2 * t); // smoothstep
+    double finalH = surfH * (1 - t) + EDGE_FLOOR * t;
+
+    return (finalH - wy) / 8.0;
 }
 
 // ─── Bake whole world into one OBJ ───────────────────────────────────────────
@@ -241,8 +257,10 @@ static class SurfaceNets
     public static Result March(Func<double, double, double, double> densityFn,
                                int ox, int oy, int oz, int size, double iso)
     {
-        // Sample density on (size+1)^3 grid. "Inside" = density > iso.
-        int N = size + 1;
+        // Sample density on (size+2)^3 grid so we have one cell of overlap on the
+        // +X/+Y/+Z side — this lets the quad loop emit the boundary quads that
+        // would otherwise leave a 1-voxel gap between chunks.
+        int N = size + 2;
         var density = new double[N * N * N];
         int Idx(int x, int y, int z) => (x * N + y) * N + z;
         for (int x = 0; x < N; x++)
@@ -250,21 +268,25 @@ static class SurfaceNets
         for (int z = 0; z < N; z++)
             density[Idx(x, y, z)] = densityFn(ox + x, oy + y, oz + z);
 
-        // One vertex per straddling cell. vIdx[size,size,size] holds -1 or index.
-        int CellIdx(int x, int y, int z) => (x * size + y) * size + z;
-        var vIdx  = new int[size * size * size];
-        var vPosX = new float[size * size * size];
-        var vPosY = new float[size * size * size];
-        var vPosZ = new float[size * size * size];
+        // Vertex grid covers (size+1)^3 cells (cell i uses density corners i..i+1).
+        int VS = size + 1;
+        int CellIdx(int x, int y, int z) => (x * VS + y) * VS + z;
+        var vIdx  = new int[VS * VS * VS];
+        var vPosX = new float[VS * VS * VS];
+        var vPosY = new float[VS * VS * VS];
+        var vPosZ = new float[VS * VS * VS];
+        var vNrmX = new float[VS * VS * VS];
+        var vNrmY = new float[VS * VS * VS];
+        var vNrmZ = new float[VS * VS * VS];
         for (int i = 0; i < vIdx.Length; i++) vIdx[i] = -1;
 
         var verts = new List<float>();
         var norms = new List<float>();
         var cols  = new List<float>();
 
-        for (int x = 0; x < size; x++)
-        for (int y = 0; y < size; y++)
-        for (int z = 0; z < size; z++)
+        for (int x = 0; x < VS; x++)
+        for (int y = 0; y < VS; y++)
+        for (int z = 0; z < VS; z++)
         {
             double d000 = density[Idx(x,   y,   z  )], d100 = density[Idx(x+1, y,   z  )],
                    d010 = density[Idx(x,   y+1, z  )], d110 = density[Idx(x+1, y+1, z  )],
@@ -308,21 +330,21 @@ static class SurfaceNets
             vPosX[ci] = (float)(x + cx);
             vPosY[ci] = (float)(y + cy);
             vPosZ[ci] = (float)(z + cz);
-            vIdx[ci]  = 0; // mark active; final index assigned after smoothing
+            vIdx[ci]  = 0;
         }
 
         // Laplacian smoothing — average each active cell with its 6 active neighbours.
         for (int pass = 0; pass < 2; pass++)
         {
-            var tX = new float[vPosX.Length];
-            var tY = new float[vPosY.Length];
-            var tZ = new float[vPosZ.Length];
-            for (int x = 1; x < size - 1; x++)
-            for (int y = 1; y < size - 1; y++)
-            for (int z = 1; z < size - 1; z++)
+            var tX = (float[])vPosX.Clone();
+            var tY = (float[])vPosY.Clone();
+            var tZ = (float[])vPosZ.Clone();
+            for (int x = 1; x < VS - 1; x++)
+            for (int y = 1; y < VS - 1; y++)
+            for (int z = 1; z < VS - 1; z++)
             {
                 int ci = CellIdx(x, y, z);
-                if (vIdx[ci] < 0) { tX[ci] = vPosX[ci]; tY[ci] = vPosY[ci]; tZ[ci] = vPosZ[ci]; continue; }
+                if (vIdx[ci] < 0) continue;
                 double nx = 0, ny = 0, nz = 0; int n = 0;
                 void Add(int dx, int dy, int dz)
                 {
@@ -336,88 +358,76 @@ static class SurfaceNets
                     tY[ci] = (float)((vPosY[ci] + ny / n) * 0.5);
                     tZ[ci] = (float)((vPosZ[ci] + nz / n) * 0.5);
                 }
-                else { tX[ci] = vPosX[ci]; tY[ci] = vPosY[ci]; tZ[ci] = vPosZ[ci]; }
             }
             Array.Copy(tX, vPosX, tX.Length);
             Array.Copy(tY, vPosY, tY.Length);
             Array.Copy(tZ, vPosZ, tZ.Length);
         }
 
-        // Quads per straddling edge (only when all 4 surrounding cells have vertices).
-        // To stay non-indexed (matches MC pipeline), we expand quads to 2 triangles.
-        void Tri(float ax, float ay, float az, float bx, float by, float bz, float cxv, float cyv, float czv)
+        // Per-vertex smooth normals from the density gradient at the vertex position.
+        // densityFn is cheap to re-sample; gradient = ∇density, normal = -∇density
+        // (density>iso = inside, so the surface normal points down-gradient).
+        const double H = 0.4;
+        for (int i = 0; i < vIdx.Length; i++)
         {
-            // Geometric normal
-            double e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-            double e2x = cxv - ax, e2y = cyv - ay, e2z = czv - az;
-            double nxn = e1y * e2z - e1z * e2y;
-            double nyn = e1z * e2x - e1x * e2z;
-            double nzn = e1x * e2y - e1y * e2x;
-            double len = Math.Sqrt(nxn * nxn + nyn * nyn + nzn * nzn) + 1e-9;
-            float fnx = (float)(nxn / len), fny = (float)(nyn / len), fnz = (float)(nzn / len);
-
-            void Push(float vx, float vy, float vz)
-            {
-                double wx = ox + vx, wy = oy + vy, wz = oz + vz;
-                verts.Add((float)wx); verts.Add((float)wy); verts.Add((float)wz);
-                norms.Add(fnx); norms.Add(fny); norms.Add(fnz);
-                double slope = Math.Abs(fny);
-                const double WATER = 8;
-                double rC, gC, bC;
-                if (wy < WATER - 1)               { rC = 0.18; gC = 0.28; bC = 0.42; }
-                else if (wy < WATER + 2.5)        { rC = 0.76; gC = 0.70; bC = 0.50; }
-                else if (wy > 52 && slope > 0.55) { rC = 0.92; gC = 0.94; bC = 0.98; }
-                else if (wy > 40 || slope < 0.45)
-                {
-                    double shade = 0.38 + slope * 0.18;
-                    rC = shade + 0.04; gC = shade; bC = shade - 0.04;
-                }
-                else if (slope > 0.72)
-                {
-                    rC = 0.22 + slope * 0.06; gC = 0.50 + slope * 0.10; bC = 0.18;
-                }
-                else
-                {
-                    double tt = (slope - 0.45) / 0.27;
-                    double shade = 0.42;
-                    rC = shade * (1 - tt) + 0.24 * tt;
-                    gC = shade * (1 - tt) + 0.52 * tt;
-                    bC = (shade - 0.04) * (1 - tt) + 0.18 * tt;
-                }
-                cols.Add((float)rC); cols.Add((float)gC); cols.Add((float)bC);
-            }
-            Push(ax, ay, az); Push(bx, by, bz); Push(cxv, cyv, czv);
+            if (vIdx[i] < 0) continue;
+            double wx = ox + vPosX[i], wy = oy + vPosY[i], wz = oz + vPosZ[i];
+            double gx = densityFn(wx + H, wy, wz) - densityFn(wx - H, wy, wz);
+            double gy = densityFn(wx, wy + H, wz) - densityFn(wx, wy - H, wz);
+            double gz = densityFn(wx, wy, wz + H) - densityFn(wx, wy, wz - H);
+            double len = Math.Sqrt(gx * gx + gy * gy + gz * gz) + 1e-9;
+            vNrmX[i] = (float)(-gx / len);
+            vNrmY[i] = (float)(-gy / len);
+            vNrmZ[i] = (float)(-gz / len);
         }
-        void Quad(int a, int b, int c, int d, bool flip)
+
+        // Emit non-indexed triangles (matches existing OBJ pipeline). Per-vertex
+        // smooth normals + per-vertex colour.
+        void Push(int vi)
         {
-            float ax = vPosX[a], ay = vPosY[a], az = vPosZ[a];
-            float bx = vPosX[b], by = vPosY[b], bz = vPosZ[b];
-            float cxv = vPosX[c], cyv = vPosY[c], czv = vPosZ[c];
-            float dx = vPosX[d], dy = vPosY[d], dz = vPosZ[d];
-            if (flip)
+            double wx = ox + vPosX[vi], wy = oy + vPosY[vi], wz = oz + vPosZ[vi];
+            verts.Add((float)wx); verts.Add((float)wy); verts.Add((float)wz);
+            float nx = vNrmX[vi], ny = vNrmY[vi], nz = vNrmZ[vi];
+            norms.Add(nx); norms.Add(ny); norms.Add(nz);
+            double slope = Math.Abs(ny);
+            const double WATER = 8;
+            double rC, gC, bC;
+            if (wy < WATER - 1)               { rC = 0.18; gC = 0.28; bC = 0.42; }
+            else if (wy < WATER + 2.5)        { rC = 0.76; gC = 0.70; bC = 0.50; }
+            else if (wy > 52 && slope > 0.55) { rC = 0.92; gC = 0.94; bC = 0.98; }
+            else if (wy > 40 || slope < 0.45)
             {
-                Tri(ax, ay, az, cxv, cyv, czv, bx, by, bz);
-                Tri(ax, ay, az, dx, dy, dz, cxv, cyv, czv);
+                double shade = 0.38 + slope * 0.18;
+                rC = shade + 0.04; gC = shade; bC = shade - 0.04;
+            }
+            else if (slope > 0.72)
+            {
+                rC = 0.22 + slope * 0.06; gC = 0.50 + slope * 0.10; bC = 0.18;
             }
             else
             {
-                Tri(ax, ay, az, bx, by, bz, cxv, cyv, czv);
-                Tri(ax, ay, az, cxv, cyv, czv, dx, dy, dz);
+                double tt = (slope - 0.45) / 0.27;
+                double shade = 0.42;
+                rC = shade * (1 - tt) + 0.24 * tt;
+                gC = shade * (1 - tt) + 0.52 * tt;
+                bC = (shade - 0.04) * (1 - tt) + 0.18 * tt;
             }
+            cols.Add((float)rC); cols.Add((float)gC); cols.Add((float)bC);
+        }
+        void Quad(int a, int b, int c, int d, bool flip)
+        {
+            if (flip) { Push(a); Push(c); Push(b); Push(a); Push(d); Push(c); }
+            else      { Push(a); Push(b); Push(c); Push(a); Push(c); Push(d); }
         }
 
-        for (int x = 1; x < size; x++)
-        for (int y = 1; y < size; y++)
-        for (int z = 1; z < size; z++)
+        // Quad-emit loop: corner (x,y,z) for x,y,z in 1..VS-1 = 1..size. Cell
+        // indices used span [x-1..x] which stays inside [0..size] = [0..VS-1].
+        for (int x = 1; x < VS; x++)
+        for (int y = 1; y < VS; y++)
+        for (int z = 1; z < VS; z++)
         {
-            // Edge along +X between (x,y,z) and (x+1,y,z) at the cell corner (x+1,y,z)
-            // shared by cells (x,y-1,z-1) (x,y,z-1) (x,y-1,z) (x,y,z).
-            // Surface-net quads sit on edges between solid/empty pairs.
-            // We test the corner densities at (x, y, z) vs neighbours.
-            // Using approach from reference baker: 3 edges per cell (+X, +Y, +Z).
             double dC = density[Idx(x, y, z)];
 
-            // +X edge
             if ((dC > iso) != (density[Idx(x - 1, y, z)] > iso))
             {
                 int v1 = CellIdx(x - 1, y, z);
@@ -427,7 +437,6 @@ static class SurfaceNets
                 if (vIdx[v1] >= 0 && vIdx[v2] >= 0 && vIdx[v3] >= 0 && vIdx[v4] >= 0)
                     Quad(v1, v2, v3, v4, dC > iso);
             }
-            // +Y edge
             if ((dC > iso) != (density[Idx(x, y - 1, z)] > iso))
             {
                 int v1 = CellIdx(x, y - 1, z);
@@ -437,7 +446,6 @@ static class SurfaceNets
                 if (vIdx[v1] >= 0 && vIdx[v2] >= 0 && vIdx[v3] >= 0 && vIdx[v4] >= 0)
                     Quad(v1, v2, v3, v4, dC > iso);
             }
-            // +Z edge
             if ((dC > iso) != (density[Idx(x, y, z - 1)] > iso))
             {
                 int v1 = CellIdx(x, y, z - 1);
@@ -452,131 +460,7 @@ static class SurfaceNets
     }
 }
 
-// ─── Parse edgeTable and triTable straight out of marching-cubes.ts ─────────
-static class TableLoader
-{
-    public record Result(List<float> Verts, List<float> Norms, List<float> Cols);
-
-    public static Result March(Func<double, double, double, double> densityFn,
-                               int ox, int oy, int oz, int size, double iso,
-                               int[] edgeTable, int[][] triTable)
-    {
-        int N = size + 1;
-        var density = new double[N * N * N];
-        int Idx(int x, int y, int z) => x * N * N + y * N + z;
-        for (int x = 0; x < N; x++)
-        for (int y = 0; y < N; y++)
-        for (int z = 0; z < N; z++)
-            density[Idx(x, y, z)] = densityFn(ox + x, oy + y, oz + z);
-
-        var verts = new List<float>();
-        var norms = new List<float>();
-        var cols  = new List<float>();
-        var edgePts = new (double X, double Y, double Z)[12];
-        var hasEdge = new bool[12];
-
-        (double, double, double) EdgeVert(int x0, int y0, int z0, int x1, int y1, int z1)
-        {
-            double d0 = density[Idx(x0, y0, z0)], d1 = density[Idx(x1, y1, z1)];
-            double t = (iso - d0) / (d1 - d0 + 1e-9);
-            return (x0 + t * (x1 - x0), y0 + t * (y1 - y0), z0 + t * (z1 - z0));
-        }
-
-        for (int x = 0; x < size; x++)
-        for (int y = 0; y < size; y++)
-        for (int z = 0; z < size; z++)
-        {
-            double c0 = density[Idx(x,   y,   z  )], c1 = density[Idx(x+1, y,   z  )],
-                   c2 = density[Idx(x+1, y,   z+1)], c3 = density[Idx(x,   y,   z+1)],
-                   c4 = density[Idx(x,   y+1, z  )], c5 = density[Idx(x+1, y+1, z  )],
-                   c6 = density[Idx(x+1, y+1, z+1)], c7 = density[Idx(x,   y+1, z+1)];
-            int cubeIdx = 0;
-            if (c0 < iso) cubeIdx |= 1;
-            if (c1 < iso) cubeIdx |= 2;
-            if (c2 < iso) cubeIdx |= 4;
-            if (c3 < iso) cubeIdx |= 8;
-            if (c4 < iso) cubeIdx |= 16;
-            if (c5 < iso) cubeIdx |= 32;
-            if (c6 < iso) cubeIdx |= 64;
-            if (c7 < iso) cubeIdx |= 128;
-            int e = edgeTable[cubeIdx];
-            if (e == 0) continue;
-
-            Array.Clear(hasEdge, 0, 12);
-            if ((e &    1) != 0) { edgePts[0]  = EdgeVert(x,   y,   z,   x+1, y,   z  ); hasEdge[0]  = true; }
-            if ((e &    2) != 0) { edgePts[1]  = EdgeVert(x+1, y,   z,   x+1, y,   z+1); hasEdge[1]  = true; }
-            if ((e &    4) != 0) { edgePts[2]  = EdgeVert(x,   y,   z+1, x+1, y,   z+1); hasEdge[2]  = true; }
-            if ((e &    8) != 0) { edgePts[3]  = EdgeVert(x,   y,   z,   x,   y,   z+1); hasEdge[3]  = true; }
-            if ((e &   16) != 0) { edgePts[4]  = EdgeVert(x,   y+1, z,   x+1, y+1, z  ); hasEdge[4]  = true; }
-            if ((e &   32) != 0) { edgePts[5]  = EdgeVert(x+1, y+1, z,   x+1, y+1, z+1); hasEdge[5]  = true; }
-            if ((e &   64) != 0) { edgePts[6]  = EdgeVert(x,   y+1, z+1, x+1, y+1, z+1); hasEdge[6]  = true; }
-            if ((e &  128) != 0) { edgePts[7]  = EdgeVert(x,   y+1, z,   x,   y+1, z+1); hasEdge[7]  = true; }
-            if ((e &  256) != 0) { edgePts[8]  = EdgeVert(x,   y,   z,   x,   y+1, z  ); hasEdge[8]  = true; }
-            if ((e &  512) != 0) { edgePts[9]  = EdgeVert(x+1, y,   z,   x+1, y+1, z  ); hasEdge[9]  = true; }
-            if ((e & 1024) != 0) { edgePts[10] = EdgeVert(x+1, y,   z+1, x+1, y+1, z+1); hasEdge[10] = true; }
-            if ((e & 2048) != 0) { edgePts[11] = EdgeVert(x,   y,   z+1, x,   y+1, z+1); hasEdge[11] = true; }
-
-            int[] tris = triTable[cubeIdx];
-            bool flipWinding = false;
-            if (tris.Length == 0 || tris[0] == -1)
-            {
-                tris = triTable[255 - cubeIdx];
-                flipWinding = true; // complementary case → reverse winding
-            }
-            if (tris.Length == 0 || tris[0] == -1) continue;
-
-            for (int t = 0; t + 2 < tris.Length && tris[t] != -1; t += 3)
-            {
-                int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
-                if (flipWinding) (i1, i2) = (i2, i1);
-                if (!hasEdge[i0] || !hasEdge[i1] || !hasEdge[i2]) continue;
-                var p0 = edgePts[i0]; var p1 = edgePts[i1]; var p2 = edgePts[i2];
-
-                double ax = p1.X - p0.X, ay = p1.Y - p0.Y, az = p1.Z - p0.Z;
-                double bx = p2.X - p0.X, by = p2.Y - p0.Y, bz = p2.Z - p0.Z;
-                double nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
-                double len = Math.Sqrt(nx * nx + ny * ny + nz * nz) + 1e-9;
-                double nxn = nx / len, nyn = ny / len, nzn = nz / len;
-
-                for (int k = 0; k < 3; k++)
-                {
-                    var pt = k == 0 ? p0 : k == 1 ? p1 : p2;
-                    verts.Add((float)(ox + pt.X));
-                    verts.Add((float)(oy + pt.Y));
-                    verts.Add((float)(oz + pt.Z));
-                    norms.Add((float)nxn); norms.Add((float)nyn); norms.Add((float)nzn);
-
-                    double worldY = oy + pt.Y;
-                    double slope  = Math.Abs(nyn);
-                    const double WATER = 8;
-                    double rC, gC, bC;
-                    if (worldY < WATER - 1)               { rC = 0.18; gC = 0.28; bC = 0.42; }
-                    else if (worldY < WATER + 2.5)        { rC = 0.76; gC = 0.70; bC = 0.50; }
-                    else if (worldY > 52 && slope > 0.55) { rC = 0.92; gC = 0.94; bC = 0.98; }
-                    else if (worldY > 40 || slope < 0.45)
-                    {
-                        double shade = 0.38 + slope * 0.18;
-                        rC = shade + 0.04; gC = shade; bC = shade - 0.04;
-                    }
-                    else if (slope > 0.72)
-                    {
-                        rC = 0.22 + slope * 0.06; gC = 0.50 + slope * 0.10; bC = 0.18;
-                    }
-                    else
-                    {
-                        double tt = (slope - 0.45) / 0.27;
-                        double shade = 0.42;
-                        rC = shade * (1 - tt) + 0.24 * tt;
-                        gC = shade * (1 - tt) + 0.52 * tt;
-                        bC = (shade - 0.04) * (1 - tt) + 0.18 * tt;
-                    }
-                    cols.Add((float)rC); cols.Add((float)gC); cols.Add((float)bC);
-                }
-            }
-        }
-        return new Result(verts, norms, cols);
-    }
-}
+// ─── Old MC implementation removed (replaced by SurfaceNets above) ──────────
 
 // ─── Parse edgeTable and triTable straight out of marching-cubes.ts ─────────
 static class TableLoader
