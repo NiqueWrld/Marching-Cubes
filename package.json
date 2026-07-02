@@ -6,7 +6,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "upload:world": "node scripts/upload-world.mjs"
+    "upload:world": "node scripts/upload-world.mjs",
+    "play:upload:internal": "node scripts/play/upload-internal.mjs",
+    "play:upload:alpha": "node scripts/play/upload-alpha.mjs",
+    "play:upload:beta": "node scripts/play/upload-beta.mjs",
+    "play:upload:production": "node scripts/play/upload-production.mjs",
+    "play:upload:track": "node scripts/play/upload-track.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",

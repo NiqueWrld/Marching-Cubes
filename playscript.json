@@ -1,0 +1,12 @@
+{
+	"aabPath": "apps/Android/source/app-release.aab",
+	"serviceAccount": "C:/keys/play-service-account.json",
+	"packageName": "com.niquewrld.studenthub",
+	"status": "completed",
+	"rollout": 0.1,
+	"releaseName": "StudentHub Release",
+	"releaseNotes": "Bug fixes and improvements",
+	"releaseNotesLang": "en-US",
+	"releaseNotesFile": "",
+	"changesNotSentForReview": false
+}
