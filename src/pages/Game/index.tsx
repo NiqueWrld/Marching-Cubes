@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { device } from '../../lib/isMobile';
 import { useDevice } from '../../hooks/useDevice';
+import ROUTES from '../../lib/routes';
 import MobileControls from './Controls/Mobile';
 
 function OnlineBar() {
@@ -108,6 +109,12 @@ function PauseMenu({ containerRef }: { containerRef: RefObject<HTMLDivElement | 
                     className="w-48 px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
                 >
                     Resume
+                </button>
+                <button
+                    onClick={() => navigate(ROUTES.GAME_SETTINGS)}
+                    className="w-48 px-5 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium transition-colors"
+                >
+                    Settings
                 </button>
                 <button
                     onClick={() => navigate('/')}

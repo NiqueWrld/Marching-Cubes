@@ -9,8 +9,22 @@ import { densityAt } from './lib/terrain.js';
 import { createWater } from './lib/water.js';
 import { loadInitialChunks, updateChunks, worldColliders, startReveal, tickReveal } from './lib/chunks.js';
 import { treeColliders } from './lib/trees.js';
+import { loadSettings } from './lib/settings.js';
+import type { GameSettings } from './lib/settings.js';
 
 export function startGame(container: HTMLElement): () => void {
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+let settings = loadSettings();
+function applySettings(s: GameSettings): void {
+    settings = s;
+    camera.fov = s.fov;
+    camera.updateProjectionMatrix();
+    renderer.shadowMap.enabled = s.shadows;
+    sun.castShadow = s.shadows;
+}
+const onSettingsChanged = (e: Event) => applySettings((e as CustomEvent<GameSettings>).detail);
+window.addEventListener('quicklife:settings', onSettingsChanged);
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -25,7 +39,6 @@ renderer.setPixelRatio(devicePixelRatio);
 renderer.setSize(container.clientWidth, container.clientHeight);
 renderer.shadowMap.enabled = true;
 container.prepend(renderer.domElement);
-
 // ─── Lighting ─────────────────────────────────────────────────────────────────
 const sun = new THREE.DirectionalLight(0xffffff, 1.2);
 sun.position.set(60, 100, 40);
@@ -33,6 +46,8 @@ sun.castShadow = true;
 scene.add(sun);
 scene.add(new THREE.AmbientLight(0x8888aa, 0.6));
 scene.add(new THREE.HemisphereLight(0x87ceeb, 0x556b2f, 0.4));
+
+applySettings(settings);
 
 // ─── Stars ────────────────────────────────────────────────────────────────────
 const starGeo = new THREE.BufferGeometry();
@@ -88,8 +103,8 @@ renderer.domElement.addEventListener('click', () => {
 
 document.addEventListener('mousemove', (e: MouseEvent) => {
     if (!locked) return;
-    yaw   -= e.movementX * 0.002;
-    pitch -= e.movementY * 0.002;
+    yaw   -= e.movementX * 0.002 * settings.sensitivity;
+    pitch -= e.movementY * 0.002 * settings.sensitivity;
     pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch));
 });
 
@@ -376,6 +391,7 @@ animate();
 return function cleanup() {
     running = false;
     window.removeEventListener('resize', onResize);
+    window.removeEventListener('quicklife:settings', onSettingsChanged);
     // Colliders are module-shared; drop this instance's meshes so a future
     // startGame() doesn't raycast against a disposed scene.
     worldColliders.length = 0;
