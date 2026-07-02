@@ -53,11 +53,11 @@ double DensityAt(double wx, double wy, double wz)
     double warpX  = noise.Perlin(wx * 0.018 + 3.7, 0, wz * 0.018) * 18;
     double warpZ  = noise.Perlin(wx * 0.018, 0, wz * 0.018 + 1.3) * 18;
     double sx = wx + warpX, sz = wz + warpZ;
-    double baseH = noise.Octave(sx * 0.035, 0, sz * 0.035, 5, 0.52, 2.1) * 14 + 13
-                 + noise.Octave(sx * 0.007, 0, sz * 0.007, 2, 0.5,  2.0) * 10;
+    double baseH = noise.Octave(sx * 0.035, 0, sz * 0.035, 5, 0.52, 2.1) * 5 + 13
+                 + noise.Octave(sx * 0.007, 0, sz * 0.007, 2, 0.5,  2.0) * 4;
     double r1 = 1.0 - Math.Abs(noise.Perlin(sx * 0.022, 0,   sz * 0.022));
     double r2 = 1.0 - Math.Abs(noise.Perlin(sx * 0.048, 0.5, sz * 0.048));
-    double ridged = r1 * r1 * 48 + r2 * r2 * 14;
+    double ridged = r1 * r1 * 14 + r2 * r2 * 4;
     double surfH = baseH + biome2 * ridged;
 
     // Fade terrain height down to below sea level near the world perimeter so
