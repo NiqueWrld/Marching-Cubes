@@ -286,7 +286,15 @@ function animate(): void {
     _groundRay.set(new THREE.Vector3(px, 500, pz), _down);
     _groundRay.far = 1000;
     const groundHits = _groundRay.intersectObjects(worldColliders, false);
-    const groundHit = groundHits[0];
+    // Trees are baked into the tiles, so the topmost hit can be a canopy.
+    // Pick the surface nearest the player's feet instead of the highest one —
+    // otherwise walking near a tree teleports you onto the canopy.
+    let groundHit;
+    let bestDist = Infinity;
+    for (const h of groundHits) {
+        const d = Math.abs(h.point.y - feetY);
+        if (d < bestDist) { bestDist = d; groundHit = h; }
+    }
     if (groundHit) {
         const surfY = groundHit.point.y;
         if (feetY < surfY) {
