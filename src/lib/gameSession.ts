@@ -16,7 +16,7 @@
  */
 
 import {
-    doc, getDoc, setDoc, runTransaction,
+    doc, getDoc, setDoc, runTransaction, writeBatch,
     serverTimestamp, Timestamp, collection, getDocs,
 } from 'firebase/firestore';
 import { firestore } from './firebase.js';
@@ -57,16 +57,22 @@ export async function claimRole(uid: string, fingerprint: string): Promise<GameR
     await runTransaction(firestore, async (tx) => {
         const snap = await getDocs(devicesRef);
 
-        // Check if any other device already holds an active player role
-        const hasActivePlayer = snap.docs.some(d => {
-            if (d.id === fingerprint) return false;
-            const data = d.data();
-            return data.role === 'player'
-                && data.active === true
-                && !isStale(data.lastSeen as Timestamp | null);
-        });
+        // Respect an explicit assignment made from the Sessions page.
+        const ownData = snap.docs.find(d => d.id === fingerprint)?.data();
+        if (ownData?.assigned === true && (ownData.role === 'player' || ownData.role === 'spectator')) {
+            role = ownData.role as GameRole;
+        } else {
+            // Check if any other device already holds an active player role
+            const hasActivePlayer = snap.docs.some(d => {
+                if (d.id === fingerprint) return false;
+                const data = d.data();
+                return data.role === 'player'
+                    && data.active === true
+                    && !isStale(data.lastSeen as Timestamp | null);
+            });
 
-        role = hasActivePlayer ? 'spectator' : 'player';
+            role = hasActivePlayer ? 'spectator' : 'player';
+        }
 
         tx.set(thisRef, {
             fingerprint,
@@ -94,4 +100,27 @@ export async function claimRole(uid: string, fingerprint: string): Promise<GameR
     (window as unknown as Record<string, unknown>).__spectator__ = (role as string) === 'spectator';
     _resolveRole(role);
     return role;
+}
+
+/**
+ * Hand the player role to a specific device (from the Sessions page).
+ * The chosen device becomes the (pinned) player; every other device is
+ * demoted to spectator. Devices watching their own doc reload to apply it.
+ */
+export async function transferPlayerRole(uid: string, targetFingerprint: string): Promise<void> {
+    const devicesRef = collection(firestore, 'sessions', uid, 'devices');
+    const snap = await getDocs(devicesRef);
+    const batch = writeBatch(firestore);
+
+    for (const d of snap.docs) {
+        if (d.id === targetFingerprint) {
+            batch.set(d.ref, { role: 'player', assigned: true }, { merge: true });
+        } else {
+            batch.set(d.ref, { role: 'spectator', assigned: false }, { merge: true });
+        }
+    }
+    if (!snap.docs.some(d => d.id === targetFingerprint)) {
+        batch.set(doc(devicesRef, targetFingerprint), { role: 'player', assigned: true }, { merge: true });
+    }
+    await batch.commit();
 }

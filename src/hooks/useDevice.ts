@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { firestore } from '../lib/firebase.js';
 import { getFingerprint } from '../lib/fingerprint.js';
 import { device } from '../lib/isMobile.js';
@@ -70,6 +70,20 @@ export function useDevice(): DeviceSession | null {
 
         return () => { cancelled = true; };
     }, [user?.uid]);
+
+    // Watch this device's role — if it's changed remotely (e.g. the player
+    // role was handed to/away from this device on the Sessions page),
+    // reload so the game restarts with the new role.
+    useEffect(() => {
+        if (!user?.uid || !session?.fingerprint || !session.role) return;
+        const ownRef = doc(firestore, 'sessions', user.uid, 'devices', session.fingerprint);
+        return onSnapshot(ownRef, (snap) => {
+            const role = snap.data()?.role as GameRole | undefined;
+            if (role && role !== session.role) {
+                window.location.reload();
+            }
+        });
+    }, [user?.uid, session?.fingerprint, session?.role]);
 
     return session;
 }

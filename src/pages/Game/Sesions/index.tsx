@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import type { Timestamp } from 'firebase/firestore';
 import { firestore } from '../../../lib/firebase.js';
 import { getFingerprint } from '../../../lib/fingerprint.js';
+import { transferPlayerRole } from '../../../lib/gameSession.js';
 import { useAuth } from '../../../context/AuthContext.js';
 import ROUTES from '../../../lib/routes.js';
 
@@ -47,6 +48,19 @@ export default function Sessions() {
     const [thisFp, setThisFp]     = useState<string | null>(null);
     const [loading, setLoading]   = useState(true);
     const [error, setError]       = useState('');
+    const [switching, setSwitching] = useState<string | null>(null);
+
+    async function makePlayer(fingerprint: string) {
+        if (!user?.uid || switching) return;
+        setSwitching(fingerprint);
+        try {
+            await transferPlayerRole(user.uid, fingerprint);
+        } catch (err) {
+            setError((err as Error).message);
+        } finally {
+            setSwitching(null);
+        }
+    }
 
     useEffect(() => {
         getFingerprint().then(setThisFp).catch(() => {});
@@ -111,6 +125,15 @@ export default function Sessions() {
                                 }`}>
                                     {s.role ?? 'unknown'}
                                 </span>
+                                {s.role !== 'player' && (
+                                    <button
+                                        onClick={() => makePlayer(s.id)}
+                                        disabled={switching !== null}
+                                        className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium transition-colors"
+                                    >
+                                        {switching === s.id ? 'Switching…' : 'Make player'}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ))}
