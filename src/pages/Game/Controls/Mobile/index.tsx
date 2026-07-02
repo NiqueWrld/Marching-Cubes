@@ -138,7 +138,15 @@ export default function MobileControls() {
     function onJumpEnd()   { mobileInput.jump = false; }
 
     return (
-        <div className="fixed inset-0 pointer-events-none select-none z-10">
+        <div
+            className="fixed inset-0 pointer-events-none select-none z-10"
+            style={{
+                paddingTop: 'env(safe-area-inset-top)',
+                paddingRight: 'env(safe-area-inset-right)',
+                paddingBottom: 'env(safe-area-inset-bottom)',
+                paddingLeft: 'env(safe-area-inset-left)',
+            }}
+        >
             {/* Left – joystick */}
             <div className="absolute bottom-10 left-10 pointer-events-auto">
                 <div

@@ -120,6 +120,48 @@ function PauseMenu({ containerRef }: { containerRef: RefObject<HTMLDivElement | 
     );
 }
 
+type DebugInfo = {
+    fps?: number;
+    x?: number; y?: number; z?: number;
+    yaw?: number; pitch?: number;
+    onGround?: boolean;
+    role?: string;
+    colliders?: number;
+};
+
+/** Dev-only debug HUD — shows live position, fps and world state. */
+function DebugHud() {
+    const [info, setInfo] = useState<DebugInfo>({});
+
+    useEffect(() => {
+        function update() {
+            const g = window as unknown as { __debug__?: DebugInfo };
+            setInfo(g.__debug__ ?? {});
+        }
+        const id = setInterval(update, 100);
+        return () => clearInterval(id);
+    }, []);
+
+    const n = (v: number | undefined, d = 2) => (typeof v === 'number' ? v.toFixed(d) : '—');
+
+    return (
+        <div className="fixed top-3 right-3 z-30 pointer-events-none select-none">
+            <div
+                className="px-3 py-2 rounded-lg border border-lime-500/30 text-[11px] leading-relaxed font-mono text-lime-300"
+                style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)', textShadow: '0 0 6px #0f0' }}
+            >
+                <div className="font-bold text-lime-400 mb-0.5">DEBUG</div>
+                <div>fps: {n(info.fps, 0)}</div>
+                <div>pos: {n(info.x)}, {n(info.y)}, {n(info.z)}</div>
+                <div>yaw: {n(info.yaw)}  pitch: {n(info.pitch)}</div>
+                <div>ground: {info.onGround ? 'yes' : 'no'}</div>
+                <div>role: {info.role ?? '—'}</div>
+                <div>colliders: {info.colliders ?? '—'}</div>
+            </div>
+        </div>
+    );
+}
+
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [tapToStart, setTapToStart] = useState(device.isMobile);
@@ -169,6 +211,9 @@ export default function Game() {
 
             {/* Pause menu – desktop only (pointer-lock based) */}
             {!device.isMobile && <PauseMenu containerRef={containerRef} />}
+
+            {/* Debug HUD – local dev only */}
+            {import.meta.env.DEV && !tapToStart && <DebugHud />}
 
             {/* Tap to start overlay – mobile only */}
             {tapToStart && (
