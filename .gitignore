@@ -9,12 +9,18 @@ public/world/
 
 scripts/BakeWorld/bin/
 scripts/BakeWorld/obj/
+World Baker/bin/
+World Baker/obj/
 
+# Android signing — never commit
 android/keystore.properties
 *.keystore
 *.jks
 apps/android/signing-key-info.txt
 
-public/world.obj
+# Firebase
+firebase-debug.log*
+.firebase/
 
 .vercel
+android/app/google-services.json
