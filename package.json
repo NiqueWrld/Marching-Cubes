@@ -6,7 +6,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "zip:world": "node scripts/zip-world.mjs",
     "upload:world": "node scripts/upload-world.mjs"
   },
   "dependencies": {

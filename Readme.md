@@ -18,16 +18,14 @@ progress bar, unzips it in memory (`fflate`), and adds tiles to the scene
 nearest-first. Browsers cache the zip via HTTP/ETag; re-bakes are picked up
 automatically because the object is uploaded with `must-revalidate`.
 
-### Bake → zip → upload workflow
+### Bake → upload workflow
 
 ```bash
-# 1. Bake the world into public/world/ (requires .NET 8)
+# 1. Bake the world into public/world/ (requires .NET 8).
+#    BakeWorld also bundles everything into public/world/world.zip.
 dotnet run --project scripts/BakeWorld -c Release
 
-# 2. Bundle into public/world/world.zip (also done automatically by upload)
-pnpm zip:world
-
-# 3. Upload world.zip to R2 (requires `npx wrangler login` once)
+# 2. Upload world.zip to R2 (requires `npx wrangler login` once)
 pnpm upload:world
 ```
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -206,9 +207,27 @@ manifest.AppendLine("  ]");
 manifest.AppendLine("}");
 File.WriteAllText(Path.Combine(outDir, "manifest.json"), manifest.ToString());
 
+// ─── Bundle manifest + tiles into world.zip ─────────────────────────────────
+string zipPath = Path.Combine(outDir, "world.zip");
+if (File.Exists(zipPath)) File.Delete(zipPath);
+long zipBytes;
+using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+{
+    int zipped = 0;
+    foreach (var file in Directory.EnumerateFiles(outDir))
+    {
+        string entryName = Path.GetFileName(file);
+        if (entryName.Equals("world.zip", StringComparison.OrdinalIgnoreCase)) continue; // don't zip ourselves
+        zip.CreateEntryFromFile(file, entryName, CompressionLevel.Optimal);
+        zipped++;
+    }
+    Console.WriteLine($"Zipped {zipped} files → {zipPath}");
+}
+zipBytes = new FileInfo(zipPath).Length;
+
 sw.Stop();
 Console.WriteLine();
-Console.WriteLine($"Done. chunks={doneChunks} tiles={tileWriters.Count} triangles={totalTris:N0} bytes={totalBytes:N0} in {sw.Elapsed.TotalSeconds:F1}s");
+Console.WriteLine($"Done. chunks={doneChunks} tiles={tileWriters.Count} triangles={totalTris:N0} bytes={totalBytes:N0} zip={zipBytes:N0} in {sw.Elapsed.TotalSeconds:F1}s");
 
 void Progress()
 {
