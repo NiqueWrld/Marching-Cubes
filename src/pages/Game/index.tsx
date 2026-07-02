@@ -29,6 +29,43 @@ function OnlineBar() {
     );
 }
 
+function HealthBar() {
+    const [health, setHealth] = useState(100);
+    const [max, setMax]       = useState(100);
+
+    useEffect(() => {
+        function update() {
+            const g = window as unknown as { __playerHealth__?: number; __playerMaxHealth__?: number };
+            if (typeof g.__playerHealth__ === 'number') setHealth(g.__playerHealth__);
+            if (typeof g.__playerMaxHealth__ === 'number') setMax(g.__playerMaxHealth__);
+        }
+        update();
+        const id = setInterval(update, 250);
+        return () => clearInterval(id);
+    }, []);
+
+    const pct = Math.max(0, Math.min(100, (health / max) * 100));
+    const barColor = pct > 50 ? 'bg-green-500' : pct > 25 ? 'bg-yellow-500' : 'bg-red-500';
+
+    return (
+        <div className="fixed bottom-4 left-4 z-20 pointer-events-none select-none">
+            <div
+                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10"
+                style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
+            >
+                <span className="text-red-400 text-sm">❤</span>
+                <div className="w-40 h-2.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                        className={`h-full rounded-full ${barColor} transition-all duration-300`}
+                        style={{ width: `${pct}%` }}
+                    />
+                </div>
+                <span className="text-xs font-mono text-white/80 w-8 text-right">{Math.round(health)}</span>
+            </div>
+        </div>
+    );
+}
+
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [tapToStart, setTapToStart] = useState(device.isMobile);
@@ -51,13 +88,17 @@ export default function Game() {
         const container = containerRef.current;
 
         let cleanup: (() => void) | undefined;
+        let cancelled = false;
         import('../../main.js').then(({ startGame }) => {
+            // Effect was cleaned up (e.g. StrictMode remount) before the
+            // module finished loading — don't start a zombie instance.
+            if (cancelled) return;
             cleanup = startGame(container);
         }).catch(err => {
             console.error('[Game] Failed to load game module:', err);
         });
 
-        return () => cleanup?.();
+        return () => { cancelled = true; cleanup?.(); };
     }, []);
 
     return (
@@ -68,6 +109,9 @@ export default function Game() {
 
             {/* Top-center online bar */}
             {!tapToStart && <OnlineBar />}
+
+            {/* Bottom-left health bar */}
+            {!tapToStart && <HealthBar />}
 
             {/* Tap to start overlay – mobile only */}
             {tapToStart && (

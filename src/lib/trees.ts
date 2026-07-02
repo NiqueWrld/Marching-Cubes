@@ -17,7 +17,7 @@ export function buildTrees(scene: THREE.Scene, key: string, cx: number, cy: numb
     const foliage: TreeColliderSet['foliage'] = [];
     const ox = cx * CHUNK, oy = cy * CHUNK, oz = cz * CHUNK;
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 2; i++) {
         const seed = Math.imul(cx, 73856093) ^ Math.imul(cz, 19349663) ^ Math.imul(i, 1234567);
         const wx = ox + seededRand(seed)     * CHUNK;
         const wz = oz + seededRand(seed + 1) * CHUNK;

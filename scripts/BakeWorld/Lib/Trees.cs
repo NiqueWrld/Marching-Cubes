@@ -6,7 +6,7 @@ using System.Globalization;
 static class Trees
 {
     /// <summary>
-    /// Generate up to 5 trees for one chunk, emit their geometry into the tile
+    /// Generate up to 2 trees for one chunk, emit their geometry into the tile
     /// writer, and record collider data on the tile.
     /// </summary>
     public static void BakeChunk(
@@ -15,7 +15,7 @@ static class Trees
         int cx, int cz, int ox, int oy, int oz,
         int chunkSz, double iso)
     {
-        for (int ti = 0; ti < 5; ti++)
+        for (int ti = 0; ti < 2; ti++)
         {
             int seedT = unchecked((cx * 73856093) ^ (cz * 19349663) ^ (ti * 1234567));
             double wx = ox + SeededRand(seedT)     * chunkSz;

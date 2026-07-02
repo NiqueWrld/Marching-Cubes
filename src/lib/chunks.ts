@@ -208,21 +208,41 @@ export async function loadInitialChunks(
     }
     updateProgress();
 
-    async function loadOne(t: ManifestTile) {
-        try {
-            const text = await fetchTileText(WORLD_DIR_URL + t.file, t.bytes);
+    const nextFrame = () => new Promise<void>(r => requestAnimationFrame(() => r()));
+
+    // Parsing an OBJ and building its BVH are expensive main-thread jobs
+    // (tens–hundreds of ms per tile). Downloads run in parallel, but the
+    // CPU work is serialized through this chain with a frame yield between
+    // steps so the render loop stays responsive during loading.
+    let processChain: Promise<void> = Promise.resolve();
+
+    function processOne(t: ManifestTile, text: string): Promise<void> {
+        const job = processChain.then(async () => {
+            await nextFrame();
             const obj = loader.parse(text);
             obj.name = t.file;
+            await nextFrame();
             processTileObj(obj, scene);
-        } catch (err) {
-            console.error(`[World] tile ${t.file} failed:`, err);
-        } finally {
             done++;
             updateProgress();
             if (!readyFired && done >= 1) {
                 readyFired = true;
                 onReady();
             }
+        });
+        // Keep the chain alive even if this tile fails; the caller handles it.
+        processChain = job.catch(() => {});
+        return job;
+    }
+
+    async function loadOne(t: ManifestTile) {
+        try {
+            const text = await fetchTileText(WORLD_DIR_URL + t.file, t.bytes);
+            await processOne(t, text);
+        } catch (err) {
+            console.error(`[World] tile ${t.file} failed:`, err);
+            done++;
+            updateProgress();
         }
     }
 

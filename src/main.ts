@@ -61,6 +61,18 @@ let velY     = 0;
 let onGround = false;
 let yaw = 0, pitch = 0, locked = false;
 
+// ─── Player health (read by the React HUD via window global) ───────────────
+const MAX_HEALTH = 100;
+let health = MAX_HEALTH;
+function setHealth(v: number): void {
+    health = Math.max(0, Math.min(MAX_HEALTH, v));
+    (window as unknown as Record<string, unknown>).__playerHealth__ = health;
+    (window as unknown as Record<string, unknown>).__playerMaxHealth__ = MAX_HEALTH;
+}
+setHealth(health);
+// Allow other systems (multiplayer hits, fall damage…) to apply damage/heals.
+(window as unknown as Record<string, unknown>).__damagePlayer__ = (amount: number) => setHealth(health - amount);
+
 const lockedMsg = document.getElementById('locked-msg') as HTMLElement;
 const lockedText = (document.getElementById('locked-text') as HTMLElement | null) ?? lockedMsg;
 const info      = document.getElementById('info')       as HTMLElement;
@@ -350,6 +362,9 @@ animate();
 return function cleanup() {
     running = false;
     window.removeEventListener('resize', onResize);
+    // Colliders are module-shared; drop this instance's meshes so a future
+    // startGame() doesn't raycast against a disposed scene.
+    worldColliders.length = 0;
     renderer.domElement.remove();
     renderer.dispose();
 };
