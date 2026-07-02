@@ -62,87 +62,104 @@ function makePlayerMesh(name: string): THREE.Group {
     return group;
 }
 
-// ── Socket connection ─────────────────────────────────────────────────────────
-let socket: Socket | null = null;
+// ── Firebase RTDB presence ────────────────────────────────────────────────────
+// Each online player writes `presence/{uid}` = { name, x, y, z, yaw, pitch }
+// (removed automatically on disconnect). Everyone subscribes to `presence`.
+interface PresenceEntry {
+    name?: string;
+    x?: number; y?: number; z?: number;
+    yaw?: number; pitch?: number;
+}
+
+let _uid: string | null = null;
+let _presenceUnsub: Unsubscribe | null = null;
+let _publishing = false;
 
 let _resolveConnected: () => void;
 export const whenConnected: Promise<void> = new Promise(res => { _resolveConnected = res; });
 
-/** Spectator camera target — updated by server player:move events when this device is a spectator */
+/** Spectator camera target — mirrors the primary device's presence entry */
 export const spectatorTarget = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, ready: false };
 
-function connect(token: string): void {
-    // Multiplayer is opt-in: only connect when VITE_SERVER_URL is configured.
-    // Without it we run offline (no backend probe, no socket spam).
-    const serverUrl = (import.meta as { env?: { VITE_SERVER_URL?: string } }).env?.VITE_SERVER_URL;
-    if (!serverUrl) {
-        console.info('[Multiplayer] No VITE_SERVER_URL set — running offline.');
-        return;
+function removeRemote(uid: string): void {
+    const entry = remotePlayers.get(uid);
+    if (entry && _scene) {
+        _scene.remove(entry.mesh);
+        entry.mesh.traverse(o => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
     }
-    doConnect(token, serverUrl);
+    remotePlayers.delete(uid);
 }
 
-function doConnect(token: string, url: string): void {
-    if (socket) socket.disconnect();
-    socket = url ? io(url, { auth: { token } }) : io({ auth: { token } });
+function connect(uid: string | null): void {
+    // Reset any previous session (auth change / game restart).
+    _presenceUnsub?.();
+    _presenceUnsub = null;
+    for (const id of [...remotePlayers.keys()]) removeRemote(id);
+    _publishing = false;
+    _uid = uid;
+    (window as unknown as Record<string, unknown>).__playerCount__ = null;
 
-    // 'spectator' event now only used for initial camera position seed
-    socket.on('spectator', ({ x, y, z, yaw, pitch }: { x?: number; y?: number; z?: number; yaw?: number; pitch?: number }) => {
-        if (typeof x === 'number') {
-            spectatorTarget.x = x; spectatorTarget.y = y!; spectatorTarget.z = z!;
-            spectatorTarget.yaw = yaw ?? 0; spectatorTarget.pitch = pitch ?? 0;
-            spectatorTarget.ready = true;
+    if (!uid) {
+        console.info('[Multiplayer] Not signed in — running offline.');
+        return;
+    }
+
+    const myRef = ref(database, `presence/${uid}`);
+    const name  = Auth.getUser()?.displayName ?? Auth.getUser()?.email ?? 'Player';
+
+    // Publish own presence unless this device is a spectator duplicate.
+    const isSpec = (window as unknown as Record<string, unknown>).__spectator__ === true;
+    if (!isSpec) {
+        onDisconnect(myRef).remove().catch(() => {/* ignore */});
+        update(myRef, { name }).then(() => {
+            _publishing = true;
+            console.log('[Multiplayer] Connected as', name);
+            _resolveConnected();
+        }).catch(err => {
+            console.warn('[Multiplayer] Presence write failed:', err);
+        });
+        window.addEventListener('beforeunload', () => { remove(myRef).catch(() => {}); });
+    }
+
+    // Subscribe to everyone's presence.
+    _presenceUnsub = onValue(ref(database, 'presence'), (snap) => {
+        const seen = new Set<string>();
+        snap.forEach((child) => {
+            const id = child.key;
+            if (!id) return;
+            const p = child.val() as PresenceEntry;
+
+            if (id === uid) {
+                // Spectator mirrors the primary device's camera.
+                if ((window as unknown as Record<string, unknown>).__spectator__ === true && typeof p.x === 'number') {
+                    spectatorTarget.x = p.x; spectatorTarget.y = p.y ?? 0; spectatorTarget.z = p.z ?? 0;
+                    spectatorTarget.yaw = p.yaw ?? 0; spectatorTarget.pitch = p.pitch ?? 0;
+                    spectatorTarget.ready = true;
+                }
+                return;
+            }
+            seen.add(id);
+
+            let entry = remotePlayers.get(id);
+            if (!entry && _scene) {
+                const mesh = makePlayerMesh(p.name ?? 'Player');
+                _scene.add(mesh);
+                entry = { mesh, name: p.name ?? 'Player' };
+                remotePlayers.set(id, entry);
+            }
+            if (entry && typeof p.x === 'number') {
+                entry.targetX   = p.x;
+                entry.targetY   = (p.y ?? 0) - 1.8;
+                entry.targetZ   = p.z;
+                entry.targetYaw = p.yaw;
+            }
+        });
+        for (const id of [...remotePlayers.keys()]) {
+            if (!seen.has(id)) removeRemote(id);
         }
-    });
-
-    socket.on('connect_error', (err: Error) => {
-        console.warn('[Multiplayer] Connection error:', err.message);
-    });
-
-    socket.on('player:join', ({ uid, name }: { uid: string; name: string; photoURL: string }) => {
-        if (!_scene || remotePlayers.has(uid)) return;
-        const mesh = makePlayerMesh(name ?? 'Player');
-        _scene.add(mesh);
-        remotePlayers.set(uid, { mesh, name });
         (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
-    });
-
-    socket.on('player:move', ({ uid, x, y, z, yaw, pitch }: { uid: string; x: number; y: number; z: number; yaw: number; pitch: number }) => {
-        // Spectator: track own primary player's position for camera sync
-        const isSpec = (window as unknown as Record<string, unknown>).__spectator__ === true;
-        if (isSpec && uid === Auth.getUser()?.uid) {
-            spectatorTarget.x = x; spectatorTarget.y = y; spectatorTarget.z = z;
-            spectatorTarget.yaw = yaw; spectatorTarget.pitch = pitch ?? 0;
-            spectatorTarget.ready = true;
-            return;
-        }
-        const entry = remotePlayers.get(uid);
-        if (!entry) return;
-        entry.targetX   = x;
-        entry.targetY   = y - 1.8;
-        entry.targetZ   = z;
-        entry.targetYaw = yaw;
-    });
-
-    socket.on('player:leave', ({ uid }: { uid: string }) => {
-        const entry = remotePlayers.get(uid);
-        if (entry && _scene) {
-            _scene.remove(entry.mesh);
-            entry.mesh.traverse(o => { if ((o as THREE.Mesh).geometry) (o as THREE.Mesh).geometry.dispose(); });
-        }
-        remotePlayers.delete(uid);
-        (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
-    });
-
-    socket.on('connect', () => {
-        console.log('[Multiplayer] Connected as', Auth.getUser()?.displayName);
-        (window as unknown as Record<string, unknown>).__playerCount__ = remotePlayers.size + 1;
-        _resolveConnected();
-    });
-
-    socket.on('disconnect', () => {
-        console.log('[Multiplayer] Disconnected');
-        (window as unknown as Record<string, unknown>).__playerCount__ = null;
+    }, (err) => {
+        console.warn('[Multiplayer] Presence subscription error:', err);
     });
 }
 
