@@ -106,6 +106,7 @@ const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 let playerSaveTimer  = 0;
 let playerSaveFailed = false;
 let running          = true;
+let fpsSmooth        = 0;
 
 lockedMsg.classList.remove('hidden');
 lockedMsg.style.display = 'block';
@@ -194,6 +195,20 @@ function animate(): void {
     clock.update();
     const dt = Math.min(clock.getDelta(), 0.05);
     tickReveal(dt);
+
+    // Debug HUD data (only consumed by the dev-only overlay).
+    if (dt > 0) fpsSmooth += ((1 / dt) - fpsSmooth) * 0.1;
+    (window as unknown as Record<string, unknown>).__debug__ = {
+        fps: fpsSmooth,
+        x: camera.position.x,
+        y: camera.position.y,
+        z: camera.position.z,
+        yaw,
+        pitch,
+        onGround,
+        role: currentRole,
+        colliders: worldColliders.length,
+    };
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
