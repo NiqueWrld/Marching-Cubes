@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
+import { unzipSync, strFromU8 } from 'fflate';
 import { CHUNK, RENDER } from './worldConstants.js';
 import { buildTrees } from './trees.js';
 
@@ -14,58 +15,16 @@ export const worldColliders: THREE.Mesh[] = [];
 // World tiles are hosted on Cloudflare R2 in production. Override at build/dev
 // time with `VITE_WORLD_BASE_URL` (must end with `/`). Falls back to the local
 // `/world/` directory for offline development.
+// The whole world (manifest + tiles) ships as a single `world.zip` archive.
 const RAW_WORLD_BASE = (import.meta.env.VITE_WORLD_BASE_URL as string | undefined) ?? '/world/';
 const WORLD_DIR_URL  = RAW_WORLD_BASE.endsWith('/') ? RAW_WORLD_BASE : RAW_WORLD_BASE + '/';
-const MANIFEST_URL   = WORLD_DIR_URL + 'manifest.json';
-const IDB_NAME  = 'world-cache';
-const IDB_STORE = 'files';
-const CACHE_VERSION = 'v6-sea-edge';
+const WORLD_ZIP_URL  = WORLD_DIR_URL + 'world.zip';
 
-interface CachedTile {
-    text: string;
-    size: number;
-    lastModified: string;
-    version: string;
-}
 interface ManifestTile {
     file: string; tx: number; tz: number; bytes: number; tris: number;
     bbox: [number, number, number, number, number, number];
 }
 interface Manifest { seed: number; chunk: number; tile: number; tiles: ManifestTile[]; }
-
-function openCache(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 2);
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror   = () => reject(req.error);
-    });
-}
-async function cacheGet(key: string): Promise<CachedTile | null> {
-    try {
-        const db = await openCache();
-        return await new Promise<CachedTile | null>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
-            tx.onsuccess = () => resolve((tx.result as CachedTile | undefined) ?? null);
-            tx.onerror   = () => reject(tx.error);
-        });
-    } catch { return null; }
-}
-async function cachePut(key: string, entry: CachedTile): Promise<void> {
-    try {
-        const db = await openCache();
-        await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(entry, key);
-            tx.onsuccess = () => resolve();
-            tx.onerror   = () => reject(tx.error);
-        });
-    } catch (err) {
-        console.warn('[World] cache write failed:', err);
-    }
-}
 
 // Reveal shader — terrain fragments outside `uRadius` (xz distance from
 // `uOrigin`) are discarded, so the world appears to flow outward from the
@@ -132,28 +91,33 @@ function processTileObj(obj: THREE.Object3D, scene: THREE.Scene): void {
     scene.add(obj);
 }
 
-async function fetchTileText(
-    url: string,
-    expectedBytes: number,
-): Promise<string> {
-    // Try cache first (validated by byte size from manifest).
-    try {
-        const cached = await cacheGet(url);
-        if (cached && cached.version === CACHE_VERSION && cached.size === expectedBytes) {
-            return cached.text;
-        }
-    } catch { /* fall through */ }
-
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-    const text = await res.text();
-    void cachePut(url, {
-        text,
-        size: text.length,
-        lastModified: res.headers.get('last-modified') || '',
-        version: CACHE_VERSION,
-    });
-    return text;
+/** Download world.zip with byte-level progress. Browser HTTP cache +
+ *  ETag revalidation avoids re-downloading an unchanged world. */
+async function fetchWorldZip(
+    onProgress: (loaded: number, total: number) => void,
+): Promise<Uint8Array> {
+    const res = await fetch(WORLD_ZIP_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${WORLD_ZIP_URL}`);
+    const total = Number(res.headers.get('content-length') ?? 0);
+    if (!res.body) {
+        const buf = new Uint8Array(await res.arrayBuffer());
+        onProgress(buf.length, buf.length);
+        return buf;
+    }
+    const reader = res.body.getReader();
+    const parts: Uint8Array[] = [];
+    let loaded = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        loaded += value.length;
+        onProgress(loaded, total);
+    }
+    const out = new Uint8Array(loaded);
+    let off = 0;
+    for (const p of parts) { out.set(p, off); off += p.length; }
+    return out;
 }
 
 /** Streaming update is a no-op: the whole world is one baked mesh. */
@@ -162,8 +126,8 @@ export function updateChunks(_scene: THREE.Scene, _camera: THREE.Camera): void {
 }
 
 /**
- * Load tiles in parallel from `/world/`, adding each to the scene as it
- * arrives so the world fills in around the player. `onReady` fires as soon
+ * Download `world.zip` (manifest + all tiles in one archive), unzip it in
+ * memory, then add tiles to the scene nearest-first. `onReady` fires as soon
  * as the nearest tile is in the scene so physics can start.
  */
 export async function loadInitialChunks(
@@ -175,16 +139,28 @@ export async function loadInitialChunks(
     const label = document.getElementById('world-progress-label') as HTMLElement | null;
     const wrap  = document.getElementById('world-progress') as HTMLElement | null;
     if (wrap) wrap.style.display = '';
-    if (label) label.textContent = 'Loading world…';
+    if (label) label.textContent = 'Downloading world…';
 
     const t0 = performance.now();
+    let entries: Record<string, Uint8Array>;
     let manifest: Manifest;
     try {
-        const res = await fetch(MANIFEST_URL, { cache: 'no-cache' });
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching manifest`);
-        manifest = await res.json();
+        const zipBytes = await fetchWorldZip((loaded, total) => {
+            if (total > 0) {
+                const pct = (loaded / total) * 100;
+                if (bar)   bar.style.width = `${pct.toFixed(1)}%`;
+                if (label) label.textContent = `Downloading world… ${(loaded / 1048576).toFixed(1)} / ${(total / 1048576).toFixed(1)} MB`;
+            } else if (label) {
+                label.textContent = `Downloading world… ${(loaded / 1048576).toFixed(1)} MB`;
+            }
+        });
+        if (label) label.textContent = 'Unpacking world…';
+        entries = unzipSync(zipBytes);
+        const manifestBytes = entries['manifest.json'];
+        if (!manifestBytes) throw new Error('world.zip is missing manifest.json');
+        manifest = JSON.parse(strFromU8(manifestBytes)) as Manifest;
     } catch (err) {
-        console.error('[World] Failed to load manifest:', err);
+        console.error('[World] Failed to load world.zip:', err);
         if (label) label.textContent = 'Failed to load world';
         throw err;
     }
@@ -203,7 +179,6 @@ export async function loadInitialChunks(
     let done = 0;
     let readyFired = false;
     const loader = new OBJLoader();
-    const CONCURRENCY = 6;
 
     function updateProgress() {
         const pct = (done / total) * 100;
@@ -215,52 +190,28 @@ export async function loadInitialChunks(
     const nextFrame = () => new Promise<void>(r => requestAnimationFrame(() => r()));
 
     // Parsing an OBJ and building its BVH are expensive main-thread jobs
-    // (tens–hundreds of ms per tile). Downloads run in parallel, but the
-    // CPU work is serialized through this chain with a frame yield between
-    // steps so the render loop stays responsive during loading.
-    let processChain: Promise<void> = Promise.resolve();
-
-    function processOne(t: ManifestTile, text: string): Promise<void> {
-        const job = processChain.then(async () => {
+    // (tens–hundreds of ms per tile). Process one tile per frame-yield so the
+    // render loop stays responsive while the world fills in.
+    for (const t of tiles) {
+        try {
+            const bytes = entries[t.file];
+            if (!bytes) throw new Error(`${t.file} missing from world.zip`);
             await nextFrame();
-            const obj = loader.parse(text);
+            const obj = loader.parse(strFromU8(bytes));
             obj.name = t.file;
             await nextFrame();
             processTileObj(obj, scene);
+        } catch (err) {
+            console.error(`[World] tile ${t.file} failed:`, err);
+        } finally {
             done++;
             updateProgress();
             if (!readyFired && done >= 1) {
                 readyFired = true;
                 onReady();
             }
-        });
-        // Keep the chain alive even if this tile fails; the caller handles it.
-        processChain = job.catch(() => {});
-        return job;
-    }
-
-    async function loadOne(t: ManifestTile) {
-        try {
-            const text = await fetchTileText(WORLD_DIR_URL + t.file, t.bytes);
-            await processOne(t, text);
-        } catch (err) {
-            console.error(`[World] tile ${t.file} failed:`, err);
-            done++;
-            updateProgress();
         }
     }
-
-    // Worker-pool style: keep CONCURRENCY downloads in flight at all times.
-    let next = 0;
-    async function worker() {
-        while (next < tiles.length) {
-            const idx = next++;
-            await loadOne(tiles[idx]);
-        }
-    }
-    const workers: Promise<void>[] = [];
-    for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
-    await Promise.all(workers);
 
     const dt = ((performance.now() - t0) / 1000).toFixed(1);
     console.log(`[World] All ${total} tiles loaded in ${dt}s — ${worldColliders.length} meshes`);

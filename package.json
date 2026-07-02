@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "vite": "vite",
+    "zip:world": "node scripts/zip-world.mjs",
     "upload:world": "node scripts/upload-world.mjs"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "cross-env": "^10.1.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "fflate": "^0.8.3",
     "firebase": "^12.13.0",
     "firebase-admin": "^12.1.0",
     "react": "^19.2.6",
