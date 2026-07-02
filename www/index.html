@@ -2,7 +2,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuickLife</title>
+    <style>
+        body { background: #030712; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; color: #9ca3af; font-family: system-ui, sans-serif; }
+    </style>
 </head>
-<body style="background:#030712"></body>
+<body>
+    <div>Loading QuickLife…</div>
+    <script>
+        const DEV  = 'http://localhost:3000';
+        const PROD = 'https://zulu-wars.vercel.app';
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1500);
+
+        fetch(DEV + '/', { mode: 'no-cors', cache: 'no-store', signal: controller.signal })
+            .then(() => { clearTimeout(timer); window.location.replace(DEV); })
+            .catch(() => { clearTimeout(timer); window.location.replace(PROD); });
+    </script>
+</body>
 </html>

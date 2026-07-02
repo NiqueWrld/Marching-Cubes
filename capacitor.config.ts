@@ -3,12 +3,12 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
     appId: 'com.niquewrld.quicklife',
     appName: 'QuickLife',
-    // Placeholder only — the app loads server.url; nothing is bundled.
+    // Loader page in www/ probes localhost:3000 and falls back to production.
     webDir: 'www',
     server: {
-        // Load the live site so the app always runs the latest deploy.
-        url: 'https://zulu-wars.vercel.app',
-        cleartext: false
+        androidScheme: 'http',
+        cleartext: true,
+        allowNavigation: ['localhost', 'zulu-wars.vercel.app']
     },
     android: {
         backgroundColor: '#030712'

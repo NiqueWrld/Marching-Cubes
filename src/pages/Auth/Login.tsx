@@ -4,6 +4,7 @@ import { GoogleLogo } from '@phosphor-icons/react';
 import { signInWithPopup, signInWithEmailAndPassword } from 'firebase/auth';
 import { Link, useNavigate } from 'react-router-dom';
 import { auth, provider } from '../../lib/firebase.js';
+import { isNativeApp, signInWithGoogleNative } from '../../lib/nativeGoogleAuth.js';
 import ROUTES from '../../lib/routes.js';
 
 export default function Login() {
@@ -16,7 +17,11 @@ export default function Login() {
     async function signInWithGoogle() {
         setStatus('Opening Google sign-in…');
         try {
-            await signInWithPopup(auth, provider);
+            if (isNativeApp()) {
+                await signInWithGoogleNative();
+            } else {
+                await signInWithPopup(auth, provider);
+            }
             navigate('/game');
         } catch (err) {
             setStatus(`Error: ${(err as Error).message}`);
