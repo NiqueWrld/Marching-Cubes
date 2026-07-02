@@ -20,9 +20,8 @@ export default defineConfig({
     server: {
         port: 3000,
         proxy: {
-            '/api':       { target: 'https://zulu-wars.vercel.app', changeOrigin: true, secure: true },
-            '/socket.io': { target: 'https://zulu-wars.vercel.app', changeOrigin: true, secure: true, ws: true },
-            '/world':     { target: 'https://zulu-wars.vercel.app', changeOrigin: true, secure: true },
+            '/api':       { target: 'http://localhost:3001', changeOrigin: true },
+            '/socket.io': { target: 'http://localhost:3001', changeOrigin: true, ws: true },
         },
     },
 });
