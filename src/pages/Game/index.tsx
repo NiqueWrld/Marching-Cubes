@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { device } from '../../lib/isMobile';
+import { useDevice } from '../../hooks/useDevice';
 import MobileControls from './Controls/Mobile';
 
 function OnlineBar() {
@@ -166,6 +167,10 @@ export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [tapToStart, setTapToStart] = useState(device.isMobile);
 
+    // Registers this device in Firestore and claims the player/spectator
+    // role — main.ts awaits the result (whenRoleKnown) before starting.
+    const session = useDevice();
+
     async function handleTap() {
         try {
             await document.documentElement.requestFullscreen();
@@ -205,6 +210,16 @@ export default function Game() {
 
             {/* Top-center online bar */}
             {!tapToStart && <OnlineBar />}
+
+            {/* Spectator mode badge */}
+            {session?.role === 'spectator' && (
+                <div className="fixed top-14 left-1/2 -translate-x-1/2 z-20 pointer-events-none select-none">
+                    <div className="px-3 py-1 rounded-full text-xs font-mono text-amber-300 border border-amber-500/30"
+                        style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}>
+                        Spectator mode — game running on another device
+                    </div>
+                </div>
+            )}
 
             {/* Bottom-left health bar */}
             {!tapToStart && <HealthBar />}
