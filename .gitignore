@@ -4,6 +4,7 @@ chunks/
 .env
 dist/
 public/world.obj
+public/world/
 *.obj
 
 scripts/BakeWorld/bin/

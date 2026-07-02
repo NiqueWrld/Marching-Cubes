@@ -11,8 +11,12 @@ import { buildTrees } from './trees.js';
 
 export const worldColliders: THREE.Mesh[] = [];
 
-const WORLD_DIR_URL = '/world/';
-const MANIFEST_URL  = WORLD_DIR_URL + 'manifest.json';
+// World tiles are hosted on Cloudflare R2 in production. Override at build/dev
+// time with `VITE_WORLD_BASE_URL` (must end with `/`). Falls back to the local
+// `/world/` directory for offline development.
+const RAW_WORLD_BASE = (import.meta.env.VITE_WORLD_BASE_URL as string | undefined) ?? '/world/';
+const WORLD_DIR_URL  = RAW_WORLD_BASE.endsWith('/') ? RAW_WORLD_BASE : RAW_WORLD_BASE + '/';
+const MANIFEST_URL   = WORLD_DIR_URL + 'manifest.json';
 const IDB_NAME  = 'world-cache';
 const IDB_STORE = 'files';
 const CACHE_VERSION = 'v6-sea-edge';
