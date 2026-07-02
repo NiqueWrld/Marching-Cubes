@@ -6,6 +6,12 @@ import { useDevice } from '../../hooks/useDevice';
 import ROUTES from '../../lib/routes';
 import MobileControls from './Controls/Mobile';
 
+/** True when running inside the Capacitor native shell (Android/iOS). */
+function isNativeApp(): boolean {
+    const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    return cap?.isNativePlatform?.() === true;
+}
+
 function OnlineBar() {
     const [count, setCount] = useState<number | null>(null);
 
@@ -128,6 +134,64 @@ function PauseMenu({ containerRef }: { containerRef: RefObject<HTMLDivElement | 
     );
 }
 
+/**
+ * Pause menu — mobile only. A tap-friendly pause button (top-right) toggles a
+ * PAUSED overlay with Resume / Settings / Leave, since mobile has no pointer lock.
+ */
+function MobilePauseMenu() {
+    const [paused, setPaused] = useState(false);
+    const navigate = useNavigate();
+
+    return (
+        <>
+            {/* Pause button */}
+            <div
+                className="fixed top-0 right-0 z-30 pointer-events-none"
+                style={{ paddingTop: 'env(safe-area-inset-top)', paddingRight: 'env(safe-area-inset-right)' }}
+            >
+                <button
+                    onClick={() => setPaused(true)}
+                    aria-label="Pause"
+                    className="m-3 w-11 h-11 rounded-full flex items-center justify-center pointer-events-auto border border-white/20 text-white active:bg-white/20 touch-none"
+                    style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
+                >
+                    <span className="flex gap-1">
+                        <span className="w-1.5 h-4 bg-white rounded-sm" />
+                        <span className="w-1.5 h-4 bg-white rounded-sm" />
+                    </span>
+                </button>
+            </div>
+
+            {/* Paused overlay */}
+            {paused && (
+                <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70" style={{ backdropFilter: 'blur(4px)' }}>
+                    <div className="flex flex-col items-center gap-4 bg-gray-900/90 border border-white/15 rounded-xl px-12 py-10 shadow-2xl">
+                        <h2 className="text-2xl font-bold tracking-widest text-white font-mono">PAUSED</h2>
+                        <button
+                            onClick={() => setPaused(false)}
+                            className="w-48 px-5 py-2.5 rounded-lg bg-blue-600 active:bg-blue-700 text-white font-medium transition-colors"
+                        >
+                            Resume
+                        </button>
+                        <button
+                            onClick={() => navigate(ROUTES.GAME_SETTINGS)}
+                            className="w-48 px-5 py-2.5 rounded-lg bg-gray-800 active:bg-gray-700 border border-gray-700 text-white font-medium transition-colors"
+                        >
+                            Settings
+                        </button>
+                        <button
+                            onClick={() => navigate('/')}
+                            className="w-48 px-5 py-2.5 rounded-lg bg-gray-800 active:bg-gray-700 border border-gray-700 text-white font-medium transition-colors"
+                        >
+                            Leave game
+                        </button>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
+
 type DebugInfo = {
     fps?: number;
     x?: number; y?: number; z?: number;
@@ -172,7 +236,7 @@ function DebugHud() {
 
 export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
-    const [tapToStart, setTapToStart] = useState(device.isMobile);
+    const [tapToStart, setTapToStart] = useState(device.isMobile && !isNativeApp());
 
     // Registers this device in Firestore and claims the player/spectator
     // role — main.ts awaits the result (whenRoleKnown) before starting.
@@ -233,6 +297,9 @@ export default function Game() {
 
             {/* Pause menu – desktop only (pointer-lock based) */}
             {!device.isMobile && <PauseMenu containerRef={containerRef} />}
+
+            {/* Pause button + menu – mobile only */}
+            {device.isMobile && !tapToStart && <MobilePauseMenu />}
 
             {/* Debug HUD – local dev only */}
             {import.meta.env.DEV && !tapToStart && <DebugHud />}
