@@ -1,7 +1,5 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../../../lib/settings.js';
-import type { GameSettings } from '../../../lib/settings.js';
+import { useSettings } from '../../../context/SettingsContext.js';
 import ROUTES from '../../../lib/routes.js';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -25,13 +23,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
 }
 
 export default function Settings() {
-    const [settings, setSettings] = useState<GameSettings>(loadSettings);
-
-    function update<K extends keyof GameSettings>(key: K, value: GameSettings[K]) {
-        const next = { ...settings, [key]: value };
-        setSettings(next);
-        saveSettings(next);
-    }
+    const { settings, update, reset } = useSettings();
 
     return (
         <div className="min-h-screen bg-gray-950 text-white p-6">
@@ -67,7 +59,7 @@ export default function Settings() {
                 </div>
 
                 <button
-                    onClick={() => { setSettings({ ...DEFAULT_SETTINGS }); saveSettings({ ...DEFAULT_SETTINGS }); }}
+                    onClick={reset}
                     className="text-sm text-gray-400 hover:text-white self-start"
                 >
                     Reset to defaults

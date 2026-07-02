@@ -11,5 +11,10 @@ service cloud.firestore {
     match /sessions/{uid}/devices/{fingerprint} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
+
+    // Per-player game settings — only the owning user.
+    match /settings/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
   }
 }

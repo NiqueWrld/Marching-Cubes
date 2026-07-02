@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { device } from '../../lib/isMobile';
-import { useDevice } from '../../hooks/useDevice';
-import ROUTES from '../../lib/routes';
+import { useSession } from '../../context/SessionContext';
 import MobileControls from './Controls/Mobile';
+import PauseMenu from './UI/PuaseMenu';
 
 function OnlineBar() {
     const [count, setCount] = useState<number | null>(null);
@@ -71,62 +69,9 @@ function HealthBar() {
 }
 
 /**
- * Pause menu — desktop only. Appears when pointer lock is released (Esc)
- * after having played, i.e. not during the initial loading screen.
+ * Pause menu — moved to ./UI/PuaseMenu (includes the in-game settings panel).
  */
-function PauseMenu({ containerRef }: { containerRef: RefObject<HTMLDivElement | null> }) {
-    const [paused, setPaused] = useState(false);
-    const everLocked = useRef(false);
-    const navigate = useNavigate();
 
-    useEffect(() => {
-        function onLockChange() {
-            const locked = document.pointerLockElement !== null;
-            if (locked) {
-                everLocked.current = true;
-                setPaused(false);
-            } else if (everLocked.current) {
-                setPaused(true);
-            }
-        }
-        document.addEventListener('pointerlockchange', onLockChange);
-        return () => document.removeEventListener('pointerlockchange', onLockChange);
-    }, []);
-
-    function resume() {
-        setPaused(false);
-        containerRef.current?.querySelector('canvas')?.requestPointerLock();
-    }
-
-    if (!paused) return null;
-
-    return (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70" style={{ backdropFilter: 'blur(4px)' }}>
-            <div className="flex flex-col items-center gap-4 bg-gray-900/90 border border-white/15 rounded-xl px-12 py-10 shadow-2xl">
-                <h2 className="text-2xl font-bold tracking-widest text-white font-mono">PAUSED</h2>
-                <button
-                    onClick={resume}
-                    className="w-48 px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
-                >
-                    Resume
-                </button>
-                <button
-                    onClick={() => navigate(ROUTES.GAME_SETTINGS)}
-                    className="w-48 px-5 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium transition-colors"
-                >
-                    Settings
-                </button>
-                <button
-                    onClick={() => navigate('/')}
-                    className="w-48 px-5 py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium transition-colors"
-                >
-                    Leave game
-                </button>
-                <p className="text-xs text-white/40 font-mono">Esc released the mouse — click Resume to continue</p>
-            </div>
-        </div>
-    );
-}
 
 type DebugInfo = {
     fps?: number;
@@ -174,9 +119,9 @@ export default function Game() {
     const containerRef = useRef<HTMLDivElement>(null);
     const [tapToStart, setTapToStart] = useState(device.isMobile);
 
-    // Registers this device in Firestore and claims the player/spectator
-    // role — main.ts awaits the result (whenRoleKnown) before starting.
-    const session = useDevice();
+    // Session manager context — device registration + player/spectator role
+    // (claimed by SessionProvider; main.ts awaits whenRoleKnown before starting).
+    const { session } = useSession();
 
     async function handleTap() {
         try {

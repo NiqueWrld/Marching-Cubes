@@ -2,17 +2,9 @@
  * Game settings persisted in localStorage.
  * Read by main.ts at startup and live where possible.
  */
+import type { GameSettings } from '../types/Settings.js';
 
-export interface GameSettings {
-    /** Mouse look sensitivity multiplier (1 = default). */
-    sensitivity: number;
-    /** Camera field of view in degrees. */
-    fov: number;
-    /** Render shadows. */
-    shadows: boolean;
-    /** Show the debug HUD. */
-    debugHud: boolean;
-}
+export type { GameSettings };
 
 export const DEFAULT_SETTINGS: GameSettings = {
     sensitivity: 1,

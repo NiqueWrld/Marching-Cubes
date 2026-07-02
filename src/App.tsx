@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { SessionProvider } from './context/SessionContext';
+import { SettingsProvider } from './context/SettingsContext';
 import Login from './pages/Auth/Login';
 import Register from './pages/Auth/Register';
 import ForgotPassword from './pages/Auth/ForgotPassword';
@@ -35,8 +37,8 @@ function AppRoutes() {
             <Route path={ROUTES.LOGIN}           element={user ? <Navigate to={ROUTES.GAME} replace /> : <Login />} />
             <Route path={ROUTES.REGISTER}        element={user ? <Navigate to={ROUTES.GAME} replace /> : <Register />} />
             <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPassword />} />
-            <Route path={ROUTES.GAME}            element={<Private><Game /></Private>} />
-            <Route path={ROUTES.GAME_SESSIONS}   element={<Private><Sessions /></Private>} />
+            <Route path={ROUTES.GAME}            element={<Private><SessionProvider><Game /></SessionProvider></Private>} />
+            <Route path={ROUTES.GAME_SESSIONS}   element={<Private><SessionProvider><Sessions /></SessionProvider></Private>} />
             <Route path={ROUTES.GAME_SETTINGS}   element={<Private><Settings /></Private>} />
             <Route path={ROUTES.PROFILE}         element={<Private><Profile /></Private>} />
             <Route path="*"                      element={<NotFound />} />
@@ -48,9 +50,11 @@ export default function App() {
     return (
         <ThemeProvider>
             <AuthProvider>
-                <BrowserRouter>
-                    <AppRoutes />
-                </BrowserRouter>
+                <SettingsProvider>
+                    <BrowserRouter>
+                        <AppRoutes />
+                    </BrowserRouter>
+                </SettingsProvider>
             </AuthProvider>
         </ThemeProvider>
     );
