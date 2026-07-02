@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ref, onValue, off } from 'firebase/database';
+import { ref, onValue } from 'firebase/database';
 import { useAuth } from '../context/AuthContext.js';
 import { database } from '../lib/firebase.js';
 import type { Player, PlayerPosition } from '../types/Player.js';
@@ -31,7 +31,7 @@ export function usePlayer(): UsePlayerResult {
             setPosition(snap.exists() ? (snap.val() as PlayerPosition) : null);
             setPosLoading(false);
         }, () => { setPosLoading(false); });
-        return () => off(posRef, 'value', unsub);
+        return unsub;
     }, [user]);
 
     // Poll online player count and spectator flag from globals set by multiplayer.ts
