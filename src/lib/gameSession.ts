@@ -87,8 +87,6 @@ export async function claimRole(uid: string, fingerprint: string): Promise<GameR
     // Release the role on tab close
     window.addEventListener('beforeunload', () => {
         clearInterval(heartbeat);
-        // Use sendBeacon-friendly approach — best-effort
-        navigator.sendBeacon?.('/api/noop'); // just to flush; actual cleanup below
         setDoc(thisRef, { active: false }, { merge: true }).catch(() => {/* ignore */});
     });
 

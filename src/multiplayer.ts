@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { io, Socket } from 'socket.io-client';
+import { ref, onValue, onDisconnect, update, remove } from 'firebase/database';
+import type { Unsubscribe } from 'firebase/database';
+import { database } from './lib/firebase.js';
 import { Auth, auth, onAuthStateChanged } from './auth.js';
 
 interface RemotePlayer {
@@ -149,15 +151,15 @@ let _sendTimer = 0;
 
 function tick(dt: number, camera: THREE.Camera, yaw: number, pitch: number): void {
     _sendTimer += dt;
-    if (_sendTimer >= 0.1 && socket?.connected) {
+    if (_sendTimer >= 0.15 && _publishing && _uid) {
         _sendTimer = 0;
-        socket.emit('player:move', {
+        update(ref(database, `presence/${_uid}`), {
             x: camera.position.x,
             y: camera.position.y,
             z: camera.position.z,
             yaw,
             pitch,
-        });
+        }).catch(() => {/* transient write failure — next tick retries */});
     }
 
     for (const entry of remotePlayers.values()) {
@@ -174,14 +176,9 @@ function tick(dt: number, camera: THREE.Camera, yaw: number, pitch: number): voi
 export function initMultiplayer(scene: THREE.Scene): void {
     _scene = scene;
     Auth.ready.then(() => {
-        connect(Auth.getToken() ?? '');
-        onAuthStateChanged(auth, async (user) => {
-            try {
-                const t = user ? await user.getIdToken() : '';
-                connect(t);
-            } catch (err) {
-                console.error('[Multiplayer] Auth state change error:', err);
-            }
+        connect(Auth.getUser()?.uid ?? null);
+        onAuthStateChanged(auth, (user) => {
+            if ((user?.uid ?? null) !== _uid) connect(user?.uid ?? null);
         });
     }).catch(err => {
         console.error('[Multiplayer] Init error:', err);

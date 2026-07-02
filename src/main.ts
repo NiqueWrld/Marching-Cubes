@@ -7,7 +7,6 @@ import { device } from './lib/isMobile.js';
 import { CHUNK, ISO } from './lib/worldConstants.js';
 import { densityAt } from './lib/terrain.js';
 import { createWater } from './lib/water.js';
-import { ChunkDB } from './lib/chunkDB.js';
 import { loadInitialChunks, updateChunks, worldColliders, startReveal, tickReveal } from './lib/chunks.js';
 import { treeColliders } from './lib/trees.js';
 
@@ -112,7 +111,7 @@ lockedMsg.classList.remove('hidden');
 lockedMsg.style.display = 'block';
 lockedText.textContent  = 'Connecting to server…';
 
-ChunkDB.open().then(async () => {
+Promise.resolve().then(async () => {
     try {
         // Race the role claim against a short timeout so the game still
         // starts if no React-side useDevice() ever calls claimRole().

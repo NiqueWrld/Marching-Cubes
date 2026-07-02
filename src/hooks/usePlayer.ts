@@ -13,8 +13,6 @@ interface UsePlayerResult {
     onlineCount: number | null;
     /** Whether the current session is a spectator (duplicate login) */
     isSpectator: boolean;
-    /** True when the Express API server is reachable */
-    serverOnline: boolean;
 }
 
 export function usePlayer(): UsePlayerResult {
@@ -23,25 +21,6 @@ export function usePlayer(): UsePlayerResult {
     const [posLoading, setPosLoading]  = useState(false);
     const [onlineCount, setOnlineCount] = useState<number | null>(null);
     const [isSpectator, setIsSpectator] = useState(false);
-    const [serverOnline, setServerOnline] = useState(true);
-
-    // Check API reachability via /api/status (socket.io server health, not position)
-    useEffect(() => {
-        let cancelled = false;
-
-        async function check() {
-            try {
-                const res = await fetch('/api/status', { cache: 'no-store' });
-                if (!cancelled) setServerOnline(res.ok);
-            } catch {
-                if (!cancelled) setServerOnline(false);
-            }
-        }
-
-        check();
-        const id = setInterval(check, 10_000);
-        return () => { cancelled = true; clearInterval(id); };
-    }, []);
 
     // Subscribe to server-saved position in real-time via RTDB
     useEffect(() => {
@@ -82,7 +61,6 @@ export function usePlayer(): UsePlayerResult {
         loading: authLoading || posLoading,
         onlineCount,
         isSpectator,
-        serverOnline,
     };
 }
 
