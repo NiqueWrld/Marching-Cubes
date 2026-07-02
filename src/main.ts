@@ -187,7 +187,6 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 // ─── Render loop ──────────────────────────────────────────────────────────────
-let _lastCoordLog = 0;
 const _down = new THREE.Vector3(0, -1, 0);
 const _groundRay = new THREE.Raycaster(new THREE.Vector3(), _down, 0, 100);
 function animate(): void {
@@ -196,13 +195,6 @@ function animate(): void {
     clock.update();
     const dt = Math.min(clock.getDelta(), 0.05);
     tickReveal(dt);
-
-    const now = performance.now();
-    if (now - _lastCoordLog > 500) {
-        _lastCoordLog = now;
-        const p = camera.position;
-        console.log(`[Player] x=${p.x.toFixed(2)} y=${p.y.toFixed(2)} z=${p.z.toFixed(2)} yaw=${yaw.toFixed(2)} pitch=${pitch.toFixed(2)}`);
-    }
 
     euler.set(pitch, yaw, 0);
     camera.quaternion.setFromEuler(euler);
