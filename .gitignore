@@ -10,6 +10,11 @@ public/world/
 scripts/BakeWorld/bin/
 scripts/BakeWorld/obj/
 
+android/keystore.properties
+*.keystore
+*.jks
+apps/android/signing-key-info.txt
+
 public/world.obj
 
 .vercel

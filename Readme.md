@@ -1,4 +1,4 @@
-# Zulu Wars
+# QuickLife
 
 Multiplayer voxel world game (Three.js + React + Express/Socket.io + Firebase).
 

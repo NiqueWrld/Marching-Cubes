@@ -1,7 +1,7 @@
 {
-  "name": "zulu-wars",
+  "name": "quicklife",
   "version": "1.0.0",
-  "description": "Zulu Wars — multiplayer voxel world game",
+  "description": "QuickLife — multiplayer voxel world game",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
